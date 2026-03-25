@@ -72,26 +72,32 @@ jobs:
                       Select-Object -First 1).Name
           Write-Host "Detected exe: $exeName"
 
-          Invoke-WebRequest "https://www.7-zip.org/a/7z2409-extra.7z" -OutFile "7z-extra.7z"
-          & "C:\Program Files\7-Zip\7z.exe" e "7z-extra.7z" "7zSD.sfx" -r -y
-
-          if (-not (Test-Path "7zSD.sfx")) {
-            Write-Host "== Archive contents for debugging =="
-            & "C:\Program Files\7-Zip\7z.exe" l "7z-extra.7z"
-            throw "7zSD.sfx was not found in the archive. See listing above."
+          # 7z.sfx ships with the 7-zip installation already on every GH Actions
+          # Windows runner - no download needed, no missing-file surprises
+          $sfxPath = "C:\Program Files\7-Zip\7z.sfx"
+          if (-not (Test-Path $sfxPath)) {
+            throw "7z.sfx not found at $sfxPath - 7-Zip may not be installed on this runner."
           }
+          Write-Host "Using SFX stub: $sfxPath"
 
-          $sfxConfig = ";!@Install@!UTF-8!`nTitle=`"Radium`"`nRunProgram=`"$exeName`"`n;!@InstallEnd@!"
+          # SFX config: silent extraction, launch the detected exe afterwards
+          $sfxConfig = ";!@Install@!UTF-8!`nTitle=`"Radium`"`nRunProgram=`"$exeName`"`nGUIMode=`"2`"`n;!@InstallEnd@!"
           [System.IO.File]::WriteAllText(
             "$PWD\sfx_config.txt",
             $sfxConfig,
             [System.Text.UTF8Encoding]::new($false)
           )
 
+          # Pack the entire Release folder
           & "C:\Program Files\7-Zip\7z.exe" a -t7z -mx=5 "payload.7z" `
               ".\build\windows\x64\runner\Release\*"
 
-          cmd /c "copy /b 7zSD.sfx + sfx_config.txt + payload.7z Radium-Nightly-Windows-x64-Portable.exe"
+          if (-not (Test-Path "payload.7z")) {
+            throw "payload.7z was not created."
+          }
+
+          # Stitch: SFX stub + config + payload -> one portable exe
+          cmd /c "copy /b `"$sfxPath`" + sfx_config.txt + payload.7z Radium-Nightly-Windows-x64-Portable.exe"
 
           if (-not (Test-Path "Radium-Nightly-Windows-x64-Portable.exe")) {
             throw "Final exe was not created - copy /b failed."
@@ -116,13 +122,14 @@ jobs:
           cp -r "${BUNDLE}/lib"     "${APPDIR}/" 2>/dev/null || true
           cp -r "${BUNDLE}/data"    "${APPDIR}/" 2>/dev/null || true
 
+          # Quoted heredoc ('APPRUN') prevents shell expanding variables here;
+          # sed replaces the placeholder with the real binary name afterwards
           cat > "${APPDIR}/AppRun" << 'APPRUN'
           #!/bin/bash
           HERE="$(dirname "$(readlink -f "${0}")")"
           export LD_LIBRARY_PATH="${HERE}/lib:${LD_LIBRARY_PATH}"
           exec "${HERE}/BINARY_PLACEHOLDER" "$@"
           APPRUN
-          # Replace placeholder with actual binary name
           sed -i "s|BINARY_PLACEHOLDER|${BINARY_NAME}|g" "${APPDIR}/AppRun"
           chmod +x "${APPDIR}/AppRun"
 
