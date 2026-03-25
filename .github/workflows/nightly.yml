@@ -2,11 +2,11 @@ name: Daily Nightly Build
 
 on:
   schedule:
-    - cron: '0 0 * * *'
-  workflow_dispatch:
+    - cron: '0 0 * * *'          # runs every day at 00:00 UTC
+  workflow_dispatch:               # allows manual trigger
 
 permissions:
-  contents: write
+  contents: write                  # needed to update the release
 
 jobs:
   check_changes:
@@ -17,13 +17,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
       - id: check
         run: |
-          # Check if any commits happened in the last 24 hours
+          # Check if there were commits in the last 24 hours
           if [ -n "$(git log --since='24 hours ago' --oneline)" ]; then
             echo "has_changes=true" >> $GITHUB_OUTPUT
           else
-            echo "No changes in 24h. Skipping."
+            echo "No changes in the last 24 hours. Skipping build."
             echo "has_changes=false" >> $GITHUB_OUTPUT
           fi
 
@@ -33,6 +34,7 @@ jobs:
     name: Nightly ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false               # build all platforms even if one fails
       matrix:
         include:
           - target: windows
@@ -44,25 +46,42 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      - uses: subosito/flutter-action@v2
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
+          flutter-version: '3.27.1'     # recent stable version that supports --universal
+          cache: true
 
-      - name: Build
-        shell: bash
+      - name: Install dependencies
+        run: flutter pub get
+
+      # ----- Windows -----
+      - name: Build Windows
+        if: matrix.target == 'windows'
         run: |
-          flutter pub get
-          if [ "${{ matrix.target }}" == "windows" ]; then
-            flutter build windows
-            7z a Radium-Nightly-Windows.zip ./build/windows/x64/release/bundle/*
-          elif [ "${{ matrix.target }}" == "linux" ]; then
-            sudo apt-get update && sudo apt-get install -y libgtk-3-dev
-            flutter build linux
-            cd build/linux/x64/release/bundle && zip -r ../../../../Radium-Nightly-Linux.zip *
-          elif [ "${{ matrix.target }}" == "macos" ]; then
-            flutter build macos --universal
-            cd build/macos/Build/Products/Release && zip -r ../../../../Radium-Nightly-MacOS.zip "Radium Launcher.app"
-          fi
+          flutter build windows
+          # Create a zip archive of the release bundle
+          7z a Radium-Nightly-Windows.zip ./build/windows/x64/release/bundle/*
+
+      # ----- Linux -----
+      - name: Build Linux
+        if: matrix.target == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev
+          flutter build linux
+          cd build/linux/x64/release/bundle
+          zip -r ../../../../Radium-Nightly-Linux.zip *
+
+      # ----- macOS -----
+      - name: Build macOS
+        if: matrix.target == 'macos'
+        run: |
+          flutter build macos --universal
+          cd build/macos/Build/Products/Release
+          zip -r ../../../../Radium-Nightly-MacOS.zip "Radium Launcher.app"
 
       - name: Update Nightly Release
         uses: softprops/action-gh-release@v1
