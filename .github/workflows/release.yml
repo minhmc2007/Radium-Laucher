@@ -1,0 +1,87 @@
+name: Manual Release Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version Tag (e.g. v1.1.0)'
+        required: true
+        default: 'v1.0.0'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: windows
+            os: windows-latest
+            file_name: Radium-Windows-Portable.zip
+          - target: linux
+            os: ubuntu-latest
+            file_name: Radium-Linux-x86_64.AppImage
+          - target: macos
+            os: macos-latest
+            file_name: Radium-MacOS-Universal.zip
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Install Dependencies
+        run: flutter pub get
+
+      # WINDOWS: Portable ZIP (Best for Flutter portability)
+      - name: Build Windows
+        if: matrix.target == 'windows'
+        run: |
+          flutter build windows
+          Compress-Archive -Path build\windows\x64\release\bundle\* -DestinationPath Radium-Windows-Portable.zip
+
+      # LINUX: AppImage
+      - name: Build Linux
+        if: matrix.target == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev liblzma-dev libgcrypt20-dev
+          flutter build linux
+          wget https://github.com/AppImage/AppImageKit/releases/download/13/appimagetool-x86_64.AppImage
+          chmod +x appimagetool-x86_64.AppImage
+          mkdir -p AppDir/usr/bin
+          cp -r build/linux/x64/release/bundle/* AppDir/usr/bin/
+          echo -e "[Desktop Entry]\nName=Radium\nExec=radium_launcher\nIcon=icon\nType=Application\nCategories=Game;" > AppDir/radium.desktop
+          cp assets/icon.png AppDir/icon.png || touch AppDir/icon.png
+          ARCH=x86_64 ./appimagetool-x86_64.AppImage AppDir Radium-Linux-x86_64.AppImage
+
+      # MACOS: Universal Zip
+      - name: Build MacOS
+        if: matrix.target == 'macos'
+        run: |
+          flutter build macos --universal
+          cd build/macos/Build/Products/Release
+          zip -r ../../../../Radium-MacOS-Universal.zip Radium\ Launcher.app
+
+      # UPLOAD TO GITHUB RELEASES
+      - name: Create Release and Upload
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.event.inputs.version }}
+          name: Release ${{ github.event.inputs.version }}
+          draft: false
+          prerelease: false
+          files: |
+            Radium-Windows-Portable.zip
+            Radium-Linux-x86_64.AppImage
+            Radium-MacOS-Universal.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
