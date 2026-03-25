@@ -21,13 +21,10 @@ jobs:
         include:
           - target: windows
             os: windows-latest
-            file_name: Radium-Windows-Portable.zip
           - target: linux
             os: ubuntu-latest
-            file_name: Radium-Linux-x86_64.AppImage
           - target: macos
             os: macos-latest
-            file_name: Radium-MacOS-Universal.zip
 
     steps:
       - uses: actions/checkout@v4
@@ -41,14 +38,14 @@ jobs:
       - name: Install Dependencies
         run: flutter pub get
 
-      # WINDOWS: Portable ZIP (Best for Flutter portability)
+      # WINDOWS
       - name: Build Windows
         if: matrix.target == 'windows'
         run: |
           flutter build windows
-          Compress-Archive -Path build\windows\x64\release\bundle\* -DestinationPath Radium-Windows-Portable.zip
+          7z a Radium-Windows-Portable.zip ./build/windows/x64/release/bundle/*
 
-      # LINUX: AppImage
+      # LINUX
       - name: Build Linux
         if: matrix.target == 'linux'
         run: |
@@ -63,22 +60,20 @@ jobs:
           cp assets/icon.png AppDir/icon.png || touch AppDir/icon.png
           ARCH=x86_64 ./appimagetool-x86_64.AppImage AppDir Radium-Linux-x86_64.AppImage
 
-      # MACOS: Universal Zip
+      # MACOS
       - name: Build MacOS
         if: matrix.target == 'macos'
         run: |
           flutter build macos --universal
           cd build/macos/Build/Products/Release
-          zip -r ../../../../Radium-MacOS-Universal.zip Radium\ Launcher.app
+          zip -r ../../../../Radium-MacOS-Universal.zip "Radium Launcher.app"
 
-      # UPLOAD TO GITHUB RELEASES
+      # UPLOAD
       - name: Create Release and Upload
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ github.event.inputs.version }}
           name: Release ${{ github.event.inputs.version }}
-          draft: false
-          prerelease: false
           files: |
             Radium-Windows-Portable.zip
             Radium-Linux-x86_64.AppImage
