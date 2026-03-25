@@ -9,7 +9,7 @@ on:
         default: 'v1.0.0'
 
 permissions:
-  contents: write
+  contents: write                  # needed to create a release
 
 jobs:
   build:
@@ -33,42 +33,59 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
+          flutter-version: '3.27.1'     # consistent with nightly
           cache: true
 
-      - name: Install Dependencies
+      - name: Install dependencies
         run: flutter pub get
 
-      # WINDOWS
+      # ----- Windows -----
       - name: Build Windows
         if: matrix.target == 'windows'
         run: |
           flutter build windows
           7z a Radium-Windows-Portable.zip ./build/windows/x64/release/bundle/*
 
-      # LINUX
-      - name: Build Linux
+      # ----- Linux -----
+      - name: Build Linux (AppImage)
         if: matrix.target == 'linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libgtk-3-dev liblzma-dev libgcrypt20-dev
           flutter build linux
+
+          # Download appimagetool
           wget https://github.com/AppImage/AppImageKit/releases/download/13/appimagetool-x86_64.AppImage
           chmod +x appimagetool-x86_64.AppImage
+
+          # Prepare AppDir structure
           mkdir -p AppDir/usr/bin
           cp -r build/linux/x64/release/bundle/* AppDir/usr/bin/
-          echo -e "[Desktop Entry]\nName=Radium\nExec=radium_launcher\nIcon=icon\nType=Application\nCategories=Game;" > AppDir/radium.desktop
+
+          # Create .desktop file
+          cat > AppDir/radium.desktop <<EOF
+          [Desktop Entry]
+          Name=Radium
+          Exec=radium_launcher
+          Icon=icon
+          Type=Application
+          Categories=Game;
+          EOF
+
+          # Copy icon (fallback if missing)
           cp assets/icon.png AppDir/icon.png || touch AppDir/icon.png
+
+          # Build AppImage
           ARCH=x86_64 ./appimagetool-x86_64.AppImage AppDir Radium-Linux-x86_64.AppImage
 
-      # MACOS
-      - name: Build MacOS
+      # ----- macOS -----
+      - name: Build macOS (Universal)
         if: matrix.target == 'macos'
         run: |
           flutter build macos --universal
           cd build/macos/Build/Products/Release
           zip -r ../../../../Radium-MacOS-Universal.zip "Radium Launcher.app"
 
-      # UPLOAD
       - name: Create Release and Upload
         uses: softprops/action-gh-release@v1
         with:
