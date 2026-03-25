@@ -29,18 +29,24 @@ jobs:
   build:
     needs: check_changes
     if: needs.check_changes.outputs.has_changes == 'true'
-    name: Nightly ${{ matrix.target }}
+    name: Nightly ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - target: windows
+          - name: Windows
+            target: windows
             os: windows-latest
-          - target: linux
+          - name: Linux
+            target: linux
             os: ubuntu-latest
-          - target: macos
-            os: macos-latest
+          - name: macOS (Intel)
+            target: macos-intel
+            os: macos-13
+          - name: macOS (Apple Silicon)
+            target: macos-arm
+            os: macos-14
 
     steps:
       - uses: actions/checkout@v4
@@ -48,11 +54,8 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: 'master'          # <-- Uses latest Dart SDK
+          channel: 'master'          # uses latest Dart + builds
           cache: true
-
-      - name: Print Flutter & Dart versions
-        run: flutter --version
 
       - name: Install dependencies
         run: flutter pub get
@@ -62,7 +65,9 @@ jobs:
         if: matrix.target == 'windows'
         run: |
           flutter build windows
-          7z a Radium-Nightly-Windows.zip ./build/windows/x64/release/bundle/*
+          # Archive the contents of the Release folder
+          cd build/windows/x64/runner/Release
+          7z a ../../../../Radium-Nightly-Windows.zip *
 
       # ----- Linux -----
       - name: Build Linux
@@ -74,13 +79,21 @@ jobs:
           cd build/linux/x64/release/bundle
           zip -r ../../../../Radium-Nightly-Linux.zip *
 
-      # ----- macOS -----
-      - name: Build macOS
-        if: matrix.target == 'macos'
+      # ----- macOS (Intel) -----
+      - name: Build macOS (Intel)
+        if: matrix.target == 'macos-intel'
         run: |
-          flutter build macos --universal
+          flutter build macos
           cd build/macos/Build/Products/Release
-          zip -r ../../../../Radium-Nightly-MacOS.zip "Radium Launcher.app"
+          zip -r ../../../../Radium-Nightly-macOS-Intel.zip "Radium Launcher.app"
+
+      # ----- macOS (Apple Silicon) -----
+      - name: Build macOS (Apple Silicon)
+        if: matrix.target == 'macos-arm'
+        run: |
+          flutter build macos
+          cd build/macos/Build/Products/Release
+          zip -r ../../../../Radium-Nightly-macOS-ARM.zip "Radium Launcher.app"
 
       - name: Update Nightly Release
         uses: softprops/action-gh-release@v1
@@ -92,6 +105,7 @@ jobs:
           files: |
             Radium-Nightly-Windows.zip
             Radium-Nightly-Linux.zip
-            Radium-Nightly-MacOS.zip
+            Radium-Nightly-macOS-Intel.zip
+            Radium-Nightly-macOS-ARM.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
