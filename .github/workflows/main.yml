@@ -34,20 +34,14 @@ jobs:
         include:
           - id: windows-x64
             os: windows-latest
-            artifact_name: Radium-Windows-x64-Setup
-            artifact_ext: .exe
             build_cmd: flutter build windows --release
 
           - id: macos-arm64
             os: macos-14
-            artifact_name: Radium-macOS-ARM64
-            artifact_ext: .zip
             build_cmd: flutter build macos --release
 
           - id: linux-x64
             os: ubuntu-latest
-            artifact_name: Radium-Linux-x64
-            artifact_ext: .AppImage
             build_cmd: flutter build linux --release
 
     steps:
@@ -70,6 +64,22 @@ jobs:
         if: matrix.id == 'windows-x64'
         run: choco install nsis -y
 
+      - name: Determine Version & Prefix
+        id: vars
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "push" ] || [ "${{ github.event.inputs.release_type }}" = "nightly" ]; then
+            echo "VERSION=Nightly" >> $GITHUB_ENV
+            echo "PREFIX=Radium-Nightly" >> $GITHUB_ENV
+          else
+            VERSION="${{ github.event.inputs.version }}"
+            # Fallback to 'Stable' if empty for some reason
+            if [ -z "$VERSION" ]; then VERSION="Stable"; fi 
+            echo "VERSION=$VERSION" >> $GITHUB_ENV
+            # e.g., Radium-v1.1.0
+            echo "PREFIX=Radium-${VERSION}" >> $GITHUB_ENV
+          fi
+
       - name: Flutter Pub Get
         run: flutter pub get
 
@@ -82,10 +92,10 @@ jobs:
         shell: bash
         run: |
           cd build/macos/Build/Products/Release
-          zip -ry ../../../../../Radium-macOS-ARM64.zip *.app
+          zip -ry ../../../../../${{ env.PREFIX }}-macOS-ARM64.zip *.app
 
-      # -- Windows (NSIS installer) --------------------------------------------
-      - name: Package - Windows (NSIS installer)
+      # -- Windows (NSIS installer & Portable) ---------------------------------
+      - name: Package - Windows (NSIS installer & Portable)
         if: matrix.id == 'windows-x64'
         shell: powershell
         run: |
@@ -93,18 +103,22 @@ jobs:
                       Select-Object -First 1).Name
           Write-Host "Detected exe: $exeName"
 
-          # Work out version string to embed in the installer
-          $isStable = ("${{ github.event_name }}" -eq "workflow_dispatch") -and
-                      ("${{ github.event.inputs.release_type }}" -eq "stable")
-          $version  = if ($isStable) { "${{ github.event.inputs.version }}" } else { "Nightly" }
-          Write-Host "Installer version label: $version"
+          $prefix = $env:PREFIX
+          $version = $env:VERSION
+          Write-Host "Building Windows packages for: $prefix"
 
+          # 1. Create Portable ZIP
+          Write-Host "Creating Portable Zip..."
+          Compress-Archive -Path "build\windows\x64\runner\Release\*" -DestinationPath "$prefix-Windows-x64-Portable.zip"
+
+          # 2. Create Installer Setup.exe
+          Write-Host "Creating Installer Executable..."
           $nsi = @"
           Unicode true
           !include "MUI2.nsh"
 
           Name              "Radium $version"
-          OutFile           "Radium-Windows-x64-Setup.exe"
+          OutFile           "$prefix-Windows-x64-Setup.exe"
           InstallDir        "`$PROGRAMFILES64\Radium"
           InstallDirRegKey  HKLM "Software\Radium" "InstallDir"
           RequestExecutionLevel admin
@@ -165,18 +179,15 @@ jobs:
 
           $nsi | Set-Content -Encoding UTF8 "installer.nsi"
           
-          # More robust execution incase path differs slightly
           $makensis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
           if (-not (Test-Path $makensis)) {
               $makensis = "makensis.exe"
           }
           & $makensis /V3 installer.nsi
 
-          if (-not (Test-Path "Radium-Windows-x64-Setup.exe")) {
+          if (-not (Test-Path "$prefix-Windows-x64-Setup.exe")) {
             throw "NSIS did not produce the installer exe."
           }
-          $size = (Get-Item "Radium-Windows-x64-Setup.exe").Length
-          Write-Host "Installer size: $size bytes"
 
       # -- Linux (AppImage) ----------------------------------------------------
       - name: Package - Linux (AppImage)
@@ -230,14 +241,14 @@ jobs:
           chmod +x appimagetool
 
           ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 \
-            ./appimagetool "${APPDIR}" "Radium-Linux-x64.AppImage"
+            ./appimagetool "${APPDIR}" "${{ env.PREFIX }}-Linux-x64.AppImage"
 
       # -- Upload --------------------------------------------------------------
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact_name }}
-          path: ${{ matrix.artifact_name }}${{ matrix.artifact_ext }}
+          name: artifacts-${{ matrix.id }}
+          path: ${{ env.PREFIX }}*
           retention-days: 3
 
   release:
@@ -282,6 +293,7 @@ jobs:
           name: ${{ env.RELEASE_NAME }}
           files: release-assets/*
           prerelease: ${{ env.IS_PRERELEASE }}
-          generate_release_notes: true
+          # Generate release notes only for stable builds to prevent duplicate changelog links on nightlies
+          generate_release_notes: ${{ env.IS_PRERELEASE == 'false' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
