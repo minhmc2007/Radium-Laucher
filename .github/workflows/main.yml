@@ -66,6 +66,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev
 
+      - name: Install NSIS (Windows)
+        if: matrix.id == 'windows-x64'
+        run: choco install nsis -y
+
       - name: Flutter Pub Get
         run: flutter pub get
 
@@ -107,7 +111,7 @@ jobs:
           SetCompressor     /SOLID lzma
 
           !define MUI_ABORTWARNING
-          !define MUI_ICON "build\windows\x64\runner\Release\data\flutter_assets\assets\icon.ico"
+          !define MUI_ICON "assets\icon.ico"
 
           !insertmacro MUI_PAGE_WELCOME
           !insertmacro MUI_PAGE_DIRECTORY
@@ -128,7 +132,7 @@ jobs:
 
             CreateShortcut "`$DESKTOP\Radium.lnk" "`$INSTDIR\$exeName"
             CreateDirectory "`$SMPROGRAMS\Radium"
-            CreateShortcut  "`$SMPROGRAMS\Radium\Radium.lnk"           "`$INSTDIR\$exeName"
+            CreateShortcut  "`$SMPROGRAMS\Radium\Radium.lnk"            "`$INSTDIR\$exeName"
             CreateShortcut  "`$SMPROGRAMS\Radium\Uninstall Radium.lnk" "`$INSTDIR\Uninstall.exe"
 
             WriteUninstaller "`$INSTDIR\Uninstall.exe"
@@ -153,14 +157,20 @@ jobs:
           "@
 
           # Drop the MUI_ICON line if the project has no .ico asset yet
-          $icoPath = "build\windows\x64\runner\Release\data\flutter_assets\assets\icon.ico"
+          $icoPath = "assets\icon.ico"
           if (-not (Test-Path $icoPath)) {
             Write-Host "No icon.ico found - falling back to NSIS default icon"
             $nsi = $nsi -replace '(?m)^.*!define MUI_ICON.*$\r?\n', ''
           }
 
           $nsi | Set-Content -Encoding UTF8 "installer.nsi"
-          & "C:\Program Files (x86)\NSIS\makensis.exe" /V3 installer.nsi
+          
+          # More robust execution incase path differs slightly
+          $makensis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+          if (-not (Test-Path $makensis)) {
+              $makensis = "makensis.exe"
+          }
+          & $makensis /V3 installer.nsi
 
           if (-not (Test-Path "Radium-Windows-x64-Setup.exe")) {
             throw "NSIS did not produce the installer exe."
@@ -203,12 +213,16 @@ jobs:
           Categories=AudioVideo;
           EOF
 
-          ICON=$(find assets linux -maxdepth 3 -name "*.png" 2>/dev/null | head -1)
-          if [ -n "${ICON}" ]; then
-            cp "${ICON}" "${APPDIR}/radium.png"
+          if [ -f "assets/icon.png" ]; then
+            cp "assets/icon.png" "${APPDIR}/radium.png"
           else
-            echo "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPj/HwADBgEB1gVHGQAAAABJRU5ErkJggg==" \
-              | base64 -d > "${APPDIR}/radium.png"
+            ICON=$(find assets linux -maxdepth 3 -name "*.png" 2>/dev/null | head -1)
+            if [ -n "${ICON}" ]; then
+              cp "${ICON}" "${APPDIR}/radium.png"
+            else
+              echo "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPj/HwADBgEB1gVHGQAAAABJRU5ErkJggg==" \
+                | base64 -d > "${APPDIR}/radium.png"
+            fi
           fi
 
           wget -q "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage" \
