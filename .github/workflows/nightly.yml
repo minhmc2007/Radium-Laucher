@@ -1,0 +1,82 @@
+name: Daily Nightly Build
+
+on:
+  schedule:
+    - cron: '0 0 * * *' # Midnight UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  check_changes:
+    runs-on: ubuntu-latest
+    outputs:
+      has_changes: ${{ steps.check.outputs.has_changes }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: check
+        run: |
+          # Find the commit SHA of the last release/pre-release
+          LAST_RELEASE_SHA=$(git rev-parse nightly-latest 2>/dev/null || echo "none")
+          CURRENT_SHA=$(git rev-parse HEAD)
+          if [ "$LAST_RELEASE_SHA" == "$CURRENT_SHA" ]; then
+            echo "No new commits since last nightly. Skipping."
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          else
+            echo "New commits detected."
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          fi
+
+  build:
+    needs: check_changes
+    if: needs: check_changes.outputs.has_changes == 'true'
+    name: Nightly ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - target: windows
+            os: windows-latest
+          - target: linux
+            os: ubuntu-latest
+          - target: macos
+            os: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+
+      - name: Build
+        shell: bash
+        run: |
+          flutter pub get
+          if [ "${{ matrix.target }}" == "windows" ]; then
+            flutter build windows
+            cd build/windows/x64/release/bundle && zip -r ../../../../Radium-Nightly-Windows.zip *
+          elif [ "${{ matrix.target }}" == "linux" ]; then
+            sudo apt-get update && sudo apt-get install -y libgtk-3-dev
+            flutter build linux
+            cd build/linux/x64/release/bundle && zip -r ../../../../Radium-Nightly-Linux.zip *
+          elif [ "${{ matrix.target }}" == "macos" ]; then
+            flutter build macos --universal
+            cd build/macos/Build/Products/Release && zip -r ../../../../Radium-Nightly-MacOS.zip Radium\ Launcher.app
+          fi
+
+      - name: Update Nightly Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: nightly-latest
+          name: "Nightly Development Build"
+          body: "Automated build of the latest commit as of $(date +'%Y-%m-%d')."
+          prerelease: true
+          files: |
+            Radium-Nightly-Windows.zip
+            Radium-Nightly-Linux.zip
+            Radium-Nightly-MacOS.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
