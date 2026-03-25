@@ -55,16 +55,16 @@ jobs:
       - name: Build
         run: ${{ matrix.build_cmd }}
 
-      # ── macOS ──────────────────────────────────────────────────────────────
-      - name: Package – macOS (zip)
+      # -- macOS ---------------------------------------------------------------
+      - name: Package - macOS (zip)
         if: matrix.id == 'macos-arm64'
         shell: bash
         run: |
           cd build/macos/Build/Products/Release
           zip -ry ../../../../../Radium-Nightly-macOS-ARM64.zip *.app
 
-      # ── Windows ────────────────────────────────────────────────────────────
-      - name: Package – Windows (portable SFX exe)
+      # -- Windows -------------------------------------------------------------
+      - name: Package - Windows (portable SFX exe)
         if: matrix.id == 'windows-x64'
         shell: powershell
         run: |
@@ -72,7 +72,6 @@ jobs:
                       Select-Object -First 1).Name
           Write-Host "Detected exe: $exeName"
 
-          # Download 7-zip Extra and extract SFX stub with -r (recursive search)
           Invoke-WebRequest "https://www.7-zip.org/a/7z2409-extra.7z" -OutFile "7z-extra.7z"
           & "C:\Program Files\7-Zip\7z.exe" e "7z-extra.7z" "7zSD.sfx" -r -y
 
@@ -82,7 +81,6 @@ jobs:
             throw "7zSD.sfx was not found in the archive. See listing above."
           }
 
-          # SFX config — tells the stub which exe to run after extraction
           $sfxConfig = ";!@Install@!UTF-8!`nTitle=`"Radium`"`nRunProgram=`"$exeName`"`n;!@InstallEnd@!"
           [System.IO.File]::WriteAllText(
             "$PWD\sfx_config.txt",
@@ -90,46 +88,44 @@ jobs:
             [System.Text.UTF8Encoding]::new($false)
           )
 
-          # Pack release folder
           & "C:\Program Files\7-Zip\7z.exe" a -t7z -mx=5 "payload.7z" `
               ".\build\windows\x64\runner\Release\*"
 
-          # Stitch into one portable exe
           cmd /c "copy /b 7zSD.sfx + sfx_config.txt + payload.7z Radium-Nightly-Windows-x64-Portable.exe"
-          if (-not (Test-Path "Radium-Nightly-Windows-x64-Portable.exe")) {
-            throw "Final exe was not created — copy /b failed."
-          }
-          Write-Host "Done: $(Get-Item Radium-Nightly-Windows-x64-Portable.exe | Select-Object -ExpandProperty Length) bytes"
 
-      # ── Linux ──────────────────────────────────────────────────────────────
-      - name: Package – Linux (AppImage)
+          if (-not (Test-Path "Radium-Nightly-Windows-x64-Portable.exe")) {
+            throw "Final exe was not created - copy /b failed."
+          }
+          $size = (Get-Item "Radium-Nightly-Windows-x64-Portable.exe").Length
+          Write-Host "Done: $size bytes"
+
+      # -- Linux ---------------------------------------------------------------
+      - name: Package - Linux (AppImage)
         if: matrix.id == 'linux-x64'
         shell: bash
         run: |
           BUNDLE="build/linux/x64/release/bundle"
           APPDIR="Radium.AppDir"
 
-          # Auto-detect the Flutter binary (first executable at bundle root)
           BINARY_PATH=$(find "${BUNDLE}" -maxdepth 1 -type f -executable | head -1)
           BINARY_NAME=$(basename "${BINARY_PATH}")
           echo "Detected binary: ${BINARY_NAME}"
 
-          # ── Build AppDir layout ────────────────────────────────────────────
           mkdir -p "${APPDIR}"
           cp "${BINARY_PATH}"       "${APPDIR}/"
           cp -r "${BUNDLE}/lib"     "${APPDIR}/" 2>/dev/null || true
           cp -r "${BUNDLE}/data"    "${APPDIR}/" 2>/dev/null || true
 
-          # AppRun: sets LD_LIBRARY_PATH and execs the binary
-          cat > "${APPDIR}/AppRun" << EOF
+          cat > "${APPDIR}/AppRun" << 'APPRUN'
           #!/bin/bash
-          HERE="\$(dirname "\$(readlink -f "\${0}")")"
-          export LD_LIBRARY_PATH="\${HERE}/lib:\${LD_LIBRARY_PATH}"
-          exec "\${HERE}/${BINARY_NAME}" "\$@"
-          EOF
+          HERE="$(dirname "$(readlink -f "${0}")")"
+          export LD_LIBRARY_PATH="${HERE}/lib:${LD_LIBRARY_PATH}"
+          exec "${HERE}/BINARY_PLACEHOLDER" "$@"
+          APPRUN
+          # Replace placeholder with actual binary name
+          sed -i "s|BINARY_PLACEHOLDER|${BINARY_NAME}|g" "${APPDIR}/AppRun"
           chmod +x "${APPDIR}/AppRun"
 
-          # .desktop file – required by appimagetool
           cat > "${APPDIR}/radium.desktop" << EOF
           [Desktop Entry]
           Name=Radium
@@ -139,25 +135,22 @@ jobs:
           Categories=AudioVideo;
           EOF
 
-          # Icon – use first project PNG asset if available, otherwise placeholder
           ICON=$(find assets linux -maxdepth 3 -name "*.png" 2>/dev/null | head -1)
           if [ -n "${ICON}" ]; then
             cp "${ICON}" "${APPDIR}/radium.png"
           else
-            echo "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk\
-          YPj/HwADBgEB1gVHGQAAAABJRU5ErkJggg==" | base64 -d > "${APPDIR}/radium.png"
+            echo "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPj/HwADBgEB1gVHGQAAAABJRU5ErkJggg==" \
+              | base64 -d > "${APPDIR}/radium.png"
           fi
 
-          # Download appimagetool
           wget -q "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage" \
                -O appimagetool
           chmod +x appimagetool
 
-          # APPIMAGE_EXTRACT_AND_RUN=1 bypasses FUSE (unavailable on GH Actions runners)
           ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 \
             ./appimagetool "${APPDIR}" "Radium-Nightly-Linux-x64.AppImage"
 
-      # ── Upload ─────────────────────────────────────────────────────────────
+      # -- Upload --------------------------------------------------------------
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
