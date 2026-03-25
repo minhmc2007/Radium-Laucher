@@ -68,31 +68,38 @@ jobs:
         if: matrix.id == 'windows-x64'
         shell: powershell
         run: |
-          # Auto-detect the Flutter-generated executable name
           $exeName = (Get-ChildItem "build\windows\x64\runner\Release\*.exe" |
                       Select-Object -First 1).Name
           Write-Host "Detected exe: $exeName"
 
-          # Download 7-zip Extra package (contains the 7zSD.sfx SFX stub)
-          # Update version string if this URL 404s: https://www.7-zip.org/download.html
+          # Download 7-zip Extra and extract SFX stub with -r (recursive search)
           Invoke-WebRequest "https://www.7-zip.org/a/7z2409-extra.7z" -OutFile "7z-extra.7z"
-          & "C:\Program Files\7-Zip\7z.exe" e "7z-extra.7z" "7zSD.sfx" -y
+          & "C:\Program Files\7-Zip\7z.exe" e "7z-extra.7z" "7zSD.sfx" -r -y
 
-          # SFX config: tells the stub which exe to launch after silent extraction
+          if (-not (Test-Path "7zSD.sfx")) {
+            Write-Host "== Archive contents for debugging =="
+            & "C:\Program Files\7-Zip\7z.exe" l "7z-extra.7z"
+            throw "7zSD.sfx was not found in the archive. See listing above."
+          }
+
+          # SFX config — tells the stub which exe to run after extraction
           $sfxConfig = ";!@Install@!UTF-8!`nTitle=`"Radium`"`nRunProgram=`"$exeName`"`n;!@InstallEnd@!"
           [System.IO.File]::WriteAllText(
             "$PWD\sfx_config.txt",
             $sfxConfig,
-            [System.Text.UTF8Encoding]::new($false)  # UTF-8, no BOM
+            [System.Text.UTF8Encoding]::new($false)
           )
 
-          # Pack the entire Release folder into a 7z archive
+          # Pack release folder
           & "C:\Program Files\7-Zip\7z.exe" a -t7z -mx=5 "payload.7z" `
               ".\build\windows\x64\runner\Release\*"
 
-          # Stitch: SFX stub + config + payload → one portable .exe
-          # The 'copy /b' binary-concat trick is the standard 7-zip SFX method
+          # Stitch into one portable exe
           cmd /c "copy /b 7zSD.sfx + sfx_config.txt + payload.7z Radium-Nightly-Windows-x64-Portable.exe"
+          if (-not (Test-Path "Radium-Nightly-Windows-x64-Portable.exe")) {
+            throw "Final exe was not created — copy /b failed."
+          }
+          Write-Host "Done: $(Get-Item Radium-Nightly-Windows-x64-Portable.exe | Select-Object -ExpandProperty Length) bytes"
 
       # ── Linux ──────────────────────────────────────────────────────────────
       - name: Package – Linux (AppImage)
@@ -114,7 +121,6 @@ jobs:
           cp -r "${BUNDLE}/data"    "${APPDIR}/" 2>/dev/null || true
 
           # AppRun: sets LD_LIBRARY_PATH and execs the binary
-          # Unquoted EOF so ${BINARY_NAME} expands; \$ escapes produce literal $ in AppRun
           cat > "${APPDIR}/AppRun" << EOF
           #!/bin/bash
           HERE="\$(dirname "\$(readlink -f "\${0}")")"
@@ -133,18 +139,16 @@ jobs:
           Categories=AudioVideo;
           EOF
 
-          # Icon – use first project PNG asset if available, otherwise use a
-          # small encoded placeholder so appimagetool doesn't bail out
+          # Icon – use first project PNG asset if available, otherwise placeholder
           ICON=$(find assets linux -maxdepth 3 -name "*.png" 2>/dev/null | head -1)
           if [ -n "${ICON}" ]; then
             cp "${ICON}" "${APPDIR}/radium.png"
           else
-            # 1×1 cornflower-blue placeholder PNG (base64-encoded)
             echo "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk\
           YPj/HwADBgEB1gVHGQAAAABJRU5ErkJggg==" | base64 -d > "${APPDIR}/radium.png"
           fi
 
-          # Download appimagetool from the official continuous release
+          # Download appimagetool
           wget -q "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage" \
                -O appimagetool
           chmod +x appimagetool
@@ -185,7 +189,7 @@ jobs:
         with:
           tag_name: ${{ env.TAG_NAME }}
           name: "Nightly Build: ${{ env.TAG_NAME }}"
-          files: release-assets/*   # picks up .exe, .AppImage, and .zip
+          files: release-assets/*
           prerelease: true
           generate_release_notes: true
         env:
