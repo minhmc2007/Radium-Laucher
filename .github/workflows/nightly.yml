@@ -1,111 +1,115 @@
-name: Daily Nightly Build
+name: Nightly Build and Release
 
 on:
-  schedule:
-    - cron: '0 0 * * *'
+  push:
+    branches:
+      - main # Change this to your main/master branch
   workflow_dispatch:
+
+# Fixes the Node.js 20 deprecation warnings
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 permissions:
   contents: write
 
 jobs:
-  check_changes:
-    runs-on: ubuntu-latest
-    outputs:
-      has_changes: ${{ steps.check.outputs.has_changes }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - id: check
-        run: |
-          if [ -n "$(git log --since='24 hours ago' --oneline)" ]; then
-            echo "has_changes=true" >> $GITHUB_OUTPUT
-          else
-            echo "No changes in the last 24 hours. Skipping."
-            echo "has_changes=false" >> $GITHUB_OUTPUT
-          fi
-
   build:
-    needs: check_changes
-    if: needs.check_changes.outputs.has_changes == 'true'
-    name: Nightly ${{ matrix.name }}
+    name: Build ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: Windows
-            target: windows
+          - name: Windows (Portable)
             os: windows-latest
-          - name: Linux
-            target: linux
-            os: ubuntu-latest
-          - name: macOS (Intel)
-            target: macos-intel
-            os: macos-13
+            artifact: Radium-Nightly-Windows.zip
+            build_cmd: flutter build windows
+            # Zips the entire release folder because Windows apps need the .dll files and data folder to run
+            package_cmd: Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath Radium-Nightly-Windows.zip
+            
           - name: macOS (Apple Silicon)
-            target: macos-arm
-            os: macos-14
+            os: macos-14 # Apple Silicon (M1/M2) runner
+            artifact: Radium-Nightly-macOS-ARM.zip
+            build_cmd: flutter build macos
+            # Using *.app dynamically fixes the "name not matched" error regardless of typos
+            package_cmd: |
+              cd build/macos/Build/Products/Release
+              zip -ry ../../../../Radium-Nightly-macOS-ARM.zip *.app
+              
+          - name: macOS (Intel)
+            os: macos-13 # Standard Intel runner (fixes the "macos-13-us-default" error)
+            artifact: Radium-Nightly-macOS-Intel.zip
+            build_cmd: flutter build macos
+            package_cmd: |
+              cd build/macos/Build/Products/Release
+              zip -ry ../../../../Radium-Nightly-macOS-Intel.zip *.app
+
+          - name: Linux
+            os: ubuntu-latest
+            artifact: Radium-Nightly-Linux.zip
+            build_cmd: flutter build linux
+            package_cmd: |
+              cd build/linux/x64/release/bundle
+              zip -r ../../../../../Radium-Nightly-Linux.zip .
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: 'master'          # uses latest Dart + builds
-          cache: true
+          channel: 'stable'
 
-      - name: Install dependencies
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y clang cmake git ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev
+
+      - name: Flutter Pub Get
         run: flutter pub get
 
-      # ----- Windows -----
-      - name: Build Windows
-        if: matrix.target == 'windows'
-        run: |
-          flutter build windows
-          # Archive the contents of the Release folder
-          cd build/windows/x64/runner/Release
-          7z a ../../../../Radium-Nightly-Windows.zip *
+      - name: Build Application
+        run: ${{ matrix.build_cmd }}
 
-      # ----- Linux -----
-      - name: Build Linux
-        if: matrix.target == 'linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev
-          flutter build linux
-          cd build/linux/x64/release/bundle
-          zip -r ../../../../Radium-Nightly-Linux.zip *
+      - name: Package Application
+        run: ${{ matrix.package_cmd }}
 
-      # ----- macOS (Intel) -----
-      - name: Build macOS (Intel)
-        if: matrix.target == 'macos-intel'
-        run: |
-          flutter build macos
-          cd build/macos/Build/Products/Release
-          zip -r ../../../../Radium-Nightly-macOS-Intel.zip "Radium Launcher.app"
-
-      # ----- macOS (Apple Silicon) -----
-      - name: Build macOS (Apple Silicon)
-        if: matrix.target == 'macos-arm'
-        run: |
-          flutter build macos
-          cd build/macos/Build/Products/Release
-          zip -r ../../../../Radium-Nightly-macOS-ARM.zip "Radium Launcher.app"
-
-      - name: Update Nightly Release
-        uses: softprops/action-gh-release@v1
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: nightly-latest
-          name: "Nightly Development Build"
-          body: "Automated nightly build. Updated on $(date +'%Y-%m-%d')."
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}
+
+  release:
+    name: Create Tag and Release
+    needs: build # 🚨 Wait for ALL builds to succeed. If one fails, this won't run, and no Tag/Release is made.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true # Combines all downloaded ZIPs into one single folder
+
+      - name: Generate Tag Name
+        id: tag
+        run: |
+          TAG="nightly-$(date +'%Y%m%d-%H%M')"
+          echo "tag_name=$TAG" >> $GITHUB_ENV
+
+      - name: Create GitHub Release
+        # Using v2 updates the background dependencies and prevents Node warnings
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.tag_name }}
+          name: Nightly Build ${{ env.tag_name }}
+          files: artifacts/*.zip
           prerelease: true
-          files: |
-            Radium-Nightly-Windows.zip
-            Radium-Nightly-Linux.zip
-            Radium-Nightly-macOS-Intel.zip
-            Radium-Nightly-macOS-ARM.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
