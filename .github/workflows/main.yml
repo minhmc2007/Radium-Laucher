@@ -1,0 +1,273 @@
+name: Main CI
+
+on:
+  push:
+    branches: [main]          # auto nightly on every push to main
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: 'Release type'
+        required: true
+        default: 'nightly'
+        type: choice
+        options:
+          - nightly
+          - stable
+      version:
+        description: 'Version tag for stable release (e.g. v1.1.0) - ignored for nightly'
+        required: false
+        default: ''
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.id }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: windows-x64
+            os: windows-latest
+            artifact_name: Radium-Windows-x64-Setup
+            artifact_ext: .exe
+            build_cmd: flutter build windows --release
+
+          - id: macos-arm64
+            os: macos-14
+            artifact_name: Radium-macOS-ARM64
+            artifact_ext: .zip
+            build_cmd: flutter build macos --release
+
+          - id: linux-x64
+            os: ubuntu-latest
+            artifact_name: Radium-Linux-x64
+            artifact_ext: .AppImage
+            build_cmd: flutter build linux --release
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Install Linux dependencies
+        if: matrix.id == 'linux-x64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev
+
+      - name: Flutter Pub Get
+        run: flutter pub get
+
+      - name: Build
+        run: ${{ matrix.build_cmd }}
+
+      # -- macOS ---------------------------------------------------------------
+      - name: Package - macOS (zip)
+        if: matrix.id == 'macos-arm64'
+        shell: bash
+        run: |
+          cd build/macos/Build/Products/Release
+          zip -ry ../../../../../Radium-macOS-ARM64.zip *.app
+
+      # -- Windows (NSIS installer) --------------------------------------------
+      - name: Package - Windows (NSIS installer)
+        if: matrix.id == 'windows-x64'
+        shell: powershell
+        run: |
+          $exeName = (Get-ChildItem "build\windows\x64\runner\Release\*.exe" |
+                      Select-Object -First 1).Name
+          Write-Host "Detected exe: $exeName"
+
+          # Work out version string to embed in the installer
+          $isStable = ("${{ github.event_name }}" -eq "workflow_dispatch") -and
+                      ("${{ github.event.inputs.release_type }}" -eq "stable")
+          $version  = if ($isStable) { "${{ github.event.inputs.version }}" } else { "Nightly" }
+          Write-Host "Installer version label: $version"
+
+          $nsi = @"
+          Unicode true
+          !include "MUI2.nsh"
+
+          Name              "Radium $version"
+          OutFile           "Radium-Windows-x64-Setup.exe"
+          InstallDir        "`$PROGRAMFILES64\Radium"
+          InstallDirRegKey  HKLM "Software\Radium" "InstallDir"
+          RequestExecutionLevel admin
+          SetCompressor     /SOLID lzma
+
+          !define MUI_ABORTWARNING
+          !define MUI_ICON "build\windows\x64\runner\Release\data\flutter_assets\assets\icon.ico"
+
+          !insertmacro MUI_PAGE_WELCOME
+          !insertmacro MUI_PAGE_DIRECTORY
+          !insertmacro MUI_PAGE_INSTFILES
+          !define MUI_FINISHPAGE_RUN      "`$INSTDIR\$exeName"
+          !define MUI_FINISHPAGE_RUN_TEXT "Launch Radium"
+          !insertmacro MUI_PAGE_FINISH
+
+          !insertmacro MUI_UNPAGE_CONFIRM
+          !insertmacro MUI_UNPAGE_INSTFILES
+
+          !insertmacro MUI_LANGUAGE "English"
+
+          Section "Radium" SecMain
+            SectionIn RO
+            SetOutPath "`$INSTDIR"
+            File /r "build\windows\x64\runner\Release\*"
+
+            CreateShortcut "`$DESKTOP\Radium.lnk" "`$INSTDIR\$exeName"
+            CreateDirectory "`$SMPROGRAMS\Radium"
+            CreateShortcut  "`$SMPROGRAMS\Radium\Radium.lnk"           "`$INSTDIR\$exeName"
+            CreateShortcut  "`$SMPROGRAMS\Radium\Uninstall Radium.lnk" "`$INSTDIR\Uninstall.exe"
+
+            WriteUninstaller "`$INSTDIR\Uninstall.exe"
+            WriteRegStr   HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Radium" "DisplayName"     "Radium $version"
+            WriteRegStr   HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Radium" "UninstallString" "`$INSTDIR\Uninstall.exe"
+            WriteRegStr   HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Radium" "DisplayIcon"     "`$INSTDIR\$exeName"
+            WriteRegStr   HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Radium" "Publisher"       "Radium"
+            WriteRegStr   HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Radium" "DisplayVersion"  "$version"
+            WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Radium" "NoModify"        1
+            WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Radium" "NoRepair"        1
+          SectionEnd
+
+          Section "Uninstall"
+            Delete "`$DESKTOP\Radium.lnk"
+            Delete "`$SMPROGRAMS\Radium\Radium.lnk"
+            Delete "`$SMPROGRAMS\Radium\Uninstall Radium.lnk"
+            RMDir  "`$SMPROGRAMS\Radium"
+            RMDir /r "`$INSTDIR"
+            DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Radium"
+            DeleteRegKey HKLM "Software\Radium"
+          SectionEnd
+          "@
+
+          # Drop the MUI_ICON line if the project has no .ico asset yet
+          $icoPath = "build\windows\x64\runner\Release\data\flutter_assets\assets\icon.ico"
+          if (-not (Test-Path $icoPath)) {
+            Write-Host "No icon.ico found - falling back to NSIS default icon"
+            $nsi = $nsi -replace '(?m)^.*!define MUI_ICON.*$\r?\n', ''
+          }
+
+          $nsi | Set-Content -Encoding UTF8 "installer.nsi"
+          & "C:\Program Files (x86)\NSIS\makensis.exe" /V3 installer.nsi
+
+          if (-not (Test-Path "Radium-Windows-x64-Setup.exe")) {
+            throw "NSIS did not produce the installer exe."
+          }
+          $size = (Get-Item "Radium-Windows-x64-Setup.exe").Length
+          Write-Host "Installer size: $size bytes"
+
+      # -- Linux (AppImage) ----------------------------------------------------
+      - name: Package - Linux (AppImage)
+        if: matrix.id == 'linux-x64'
+        shell: bash
+        run: |
+          BUNDLE="build/linux/x64/release/bundle"
+          APPDIR="Radium.AppDir"
+
+          BINARY_PATH=$(find "${BUNDLE}" -maxdepth 1 -type f -executable | head -1)
+          BINARY_NAME=$(basename "${BINARY_PATH}")
+          echo "Detected binary: ${BINARY_NAME}"
+
+          mkdir -p "${APPDIR}"
+          cp "${BINARY_PATH}"       "${APPDIR}/"
+          cp -r "${BUNDLE}/lib"     "${APPDIR}/" 2>/dev/null || true
+          cp -r "${BUNDLE}/data"    "${APPDIR}/" 2>/dev/null || true
+
+          cat > "${APPDIR}/AppRun" << 'APPRUN'
+          #!/bin/bash
+          HERE="$(dirname "$(readlink -f "${0}")")"
+          export LD_LIBRARY_PATH="${HERE}/lib:${LD_LIBRARY_PATH}"
+          exec "${HERE}/BINARY_PLACEHOLDER" "$@"
+          APPRUN
+          sed -i "s|BINARY_PLACEHOLDER|${BINARY_NAME}|g" "${APPDIR}/AppRun"
+          chmod +x "${APPDIR}/AppRun"
+
+          cat > "${APPDIR}/radium.desktop" << EOF
+          [Desktop Entry]
+          Name=Radium
+          Exec=${BINARY_NAME}
+          Icon=radium
+          Type=Application
+          Categories=AudioVideo;
+          EOF
+
+          ICON=$(find assets linux -maxdepth 3 -name "*.png" 2>/dev/null | head -1)
+          if [ -n "${ICON}" ]; then
+            cp "${ICON}" "${APPDIR}/radium.png"
+          else
+            echo "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPj/HwADBgEB1gVHGQAAAABJRU5ErkJggg==" \
+              | base64 -d > "${APPDIR}/radium.png"
+          fi
+
+          wget -q "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage" \
+               -O appimagetool
+          chmod +x appimagetool
+
+          ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 \
+            ./appimagetool "${APPDIR}" "Radium-Linux-x64.AppImage"
+
+      # -- Upload --------------------------------------------------------------
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.artifact_name }}${{ matrix.artifact_ext }}
+          retention-days: 3
+
+  release:
+    name: Create Release
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Resolve Tag and Release Metadata
+        run: |
+          # Nightly: triggered by push to main OR manually choosing "nightly"
+          if [ "${{ github.event_name }}" = "push" ] || \
+             [ "${{ github.event.inputs.release_type }}" = "nightly" ]; then
+            TAG="nightly-$(date +'%Y%m%d-%H%M')"
+            echo "TAG_NAME=$TAG"                     >> $GITHUB_ENV
+            echo "RELEASE_NAME=Nightly Build: $TAG"  >> $GITHUB_ENV
+            echo "IS_PRERELEASE=true"                >> $GITHUB_ENV
+          else
+            # Stable: manually triggered with release_type = stable
+            VERSION="${{ github.event.inputs.version }}"
+            if [ -z "$VERSION" ]; then
+              echo "ERROR: version input is required for a stable release."
+              exit 1
+            fi
+            echo "TAG_NAME=$VERSION"                 >> $GITHUB_ENV
+            echo "RELEASE_NAME=Release $VERSION"     >> $GITHUB_ENV
+            echo "IS_PRERELEASE=false"               >> $GITHUB_ENV
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG_NAME }}
+          name: ${{ env.RELEASE_NAME }}
+          files: release-assets/*
+          prerelease: ${{ env.IS_PRERELEASE }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
