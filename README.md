@@ -3,9 +3,19 @@
 
 Radium is a high-performance, aesthetically driven Minecraft launcher built with Flutter. It combines a modern Glassmorphic interface with a robust, "self-healing" execution engine optimized for modern desktop environments—specifically tailored for **Arch Linux (PipeWire)**, macOS, and Windows.
 
+[![Main CI](https://github.com/minhmc2007/Radium-Laucher/actions/workflows/main.yml/badge.svg)](https://github.com/minhmc2007/Radium-Laucher/actions/workflows/main.yml)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)
 ![Framework](https://img.shields.io/badge/framework-Flutter-02569B.svg)
+
+---
+
+## 📥 Downloads
+
+Get the latest version of Radium Launcher for your platform:
+
+*   🚀 **[Latest Stable Release](https://github.com/minhmc2007/Radium-Laucher/releases/latest):** Recommended for most users. Tested and verified.
+*   🌙 **[Nightly / Pre-release Builds](https://github.com/minhmc2007/Radium-Laucher/releases):** Bleeding edge features. Updated frequently with the latest core improvements.
 
 ---
 
@@ -81,7 +91,7 @@ This project is licensed under the **GNU General Public License v3.0 (GPL-3.0)**
 ## 📝 Legal
 **Radium Launcher** is not affiliated with Mojang Studios or Microsoft. Minecraft is a trademark of Mojang Synergies AB. This software is provided as-is for personal game management and development.
 
-***
+*** 
 
 ### Links
 *   **Source Code:** [https://github.com/minhmc2007/Radium-Laucher](https://github.com/minhmc2007/Radium-Laucher)
