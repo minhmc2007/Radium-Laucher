@@ -1,4 +1,6 @@
-//launcher_platform.dart
+// Platform-specific integrations: native Java executable picker, JDK lifecycle
+// (Adoptium Temurin install/scan, Arch `archlinux-java`, persisted managed Javas),
+// and Microsoft device-flow + offline Minecraft authentication helpers.
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;

@@ -1,4 +1,6 @@
-//minecraft_core.dart
+// Minecraft client bootstrap: default game directory, version manifest merge (`inheritsFrom`),
+// library/native/asset download and verification, classpath + JVM/game argument assembly, and
+// starting the Java process for the selected instance (including isolated profile game dirs).
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -47,7 +49,7 @@ class MinecraftCore {
       logVerbose("Inheriting manifest properties from $parentVersion");
       final parentManifest = await resolveManifest(mcDir, parentVersion);
       
-      final List libs = parentManifest['libraries'] ??[];
+      final List libs = parentManifest['libraries'] ?? [];
       libs.addAll(manifest['libraries'] ??[]);
       manifest['libraries'] = libs;
       
@@ -79,7 +81,7 @@ class MinecraftCore {
     return manifest;
   }
 
-  // FIX: Added expectedSize verification and Retry Loops to auto-heal corrupted audio files
+  // Auto-heal corrupted files
   static Future<void> downloadFile(String url, String destPath, {int? expectedSize, http.Client? client}) async {
     final file = File(destPath);
     if (await file.exists()) {
@@ -103,7 +105,6 @@ class MinecraftCore {
           final res = await useClient.get(Uri.parse(url));
           if (res.statusCode == 200) {
             await file.writeAsBytes(res.bodyBytes);
-            // Post-download verification
             if (expectedSize != null && await file.length() != expectedSize) {
                throw Exception("Downloaded file corrupted during sync.");
             }
@@ -121,17 +122,36 @@ class MinecraftCore {
     }
   }
 
+  // FIX: Overhauled Native Extraction to reliably fetch OpenAL DLLs safely across OS formats
   static Future<void> extractNatives(String zipPath, String destDir) async {
     logVerbose("Extracting native library: $zipPath -> $destDir");
     await Directory(destDir).create(recursive: true);
     try {
       if (Platform.isWindows) {
-        await Process.run('powershell',['-NoProfile', '-Command', "Expand-Archive -Force -Path '$zipPath' -DestinationPath '$destDir'"]);
+        try {
+          // Windows 10+ has tar built-in, natively handles jars without the extension complaining
+          var res = await Process.run('tar', ['-xf', zipPath, '-C', destDir]);
+          if (res.exitCode != 0) throw Exception("tar exit code ${res.exitCode}");
+        } catch (_) {
+          logVerbose("tar failed, falling back to powershell...");
+          try {
+            // Workaround for Expand-Archive erroring on .jar files: Rename to temporary .zip
+            var psRes = await Process.run('powershell',['-NoProfile', '-Command', 
+              "Copy-Item '$zipPath' '$zipPath.zip'; Expand-Archive -Force -Path '$zipPath.zip' -DestinationPath '$destDir'; Remove-Item '$zipPath.zip'"
+            ]);
+            if (psRes.exitCode != 0) throw Exception("powershell exit code ${psRes.exitCode}");
+          } catch (_) {
+             logVerbose("powershell failed, falling back to jar xf...");
+             await Process.run('jar', ['xf', zipPath], workingDirectory: destDir);
+          }
+        }
       } else {
-        var res = await Process.run('unzip',['-o', '-q', zipPath, '-d', destDir]);
-        if (res.exitCode != 0) {
+        try {
+          var res = await Process.run('unzip', ['-o', '-q', zipPath, '-d', destDir]);
+          if (res.exitCode != 0) throw Exception("unzip exit code ${res.exitCode}");
+        } catch (_) {
           logVerbose("unzip failed, falling back to Java 'jar xf'...");
-          await Process.run('jar',['xf', zipPath], workingDirectory: destDir);
+          await Process.run('jar', ['xf', zipPath], workingDirectory: destDir);
         }
       }
     } catch (e) {
@@ -190,10 +210,23 @@ class MinecraftCore {
             await downloadFile(art['url'], path, expectedSize: artSize, client: client);
           }
 
+          // FIX: Added Dynamic OS Classifier logic for MacOS (Fixes legacy vs new Mac versions mapping)
           if (lib['downloads'] != null && lib['downloads']['classifiers'] != null) {
-            String osKey = Platform.isWindows ? 'natives-windows' : (Platform.isMacOS ? 'natives-macos' : 'natives-linux');
-            if (lib['downloads']['classifiers'][osKey] != null) {
-              final nat = lib['downloads']['classifiers'][osKey];
+            Map classifiers = lib['downloads']['classifiers'];
+            String? targetOsKey;
+            
+            if (Platform.isWindows) {
+              if (classifiers.containsKey('natives-windows')) targetOsKey = 'natives-windows';
+            } else if (Platform.isMacOS) {
+              // Legacy uses 'natives-osx', newer uses 'natives-macos'
+              if (classifiers.containsKey('natives-macos')) targetOsKey = 'natives-macos';
+              else if (classifiers.containsKey('natives-osx')) targetOsKey = 'natives-osx';
+            } else {
+              if (classifiers.containsKey('natives-linux')) targetOsKey = 'natives-linux';
+            }
+
+            if (targetOsKey != null && classifiers[targetOsKey] != null) {
+              final nat = classifiers[targetOsKey];
               final path = "$mcDir${sep}libraries$sep${nat['path'].replaceAll('/', sep)}";
               final int? natSize = nat['size'] is int ? nat['size'] : null;
               await downloadFile(nat['url'], path, expectedSize: natSize, client: client);
@@ -294,7 +327,7 @@ class MinecraftCore {
     await verifyAndDownload(mcDir, manifest, versionDir, onLog);
 
     onLog(1.0, "ASSEMBLING CLASSPATH...");
-    List<String> classpath =[];
+    List<String> classpath = [];
     if (manifest['libraries'] != null) {
       for (var lib in manifest['libraries']) {
         if (!checkOSRule(lib['rules'])) continue;
@@ -362,8 +395,13 @@ class MinecraftCore {
     }
 
     if (!args.contains("-cp")) args.addAll(["-cp", cpString]);
+    
+    // FIX: Enforce specific lwjgl.librarypath arguments alongside java.library.path to guarantee Audio engine mounting
     if (!args.any((a) => a.startsWith("-Djava.library.path="))) {
       args.add("-Djava.library.path=$versionDir${sep}natives");
+    }
+    if (!args.any((a) => a.startsWith("-Dorg.lwjgl.librarypath="))) {
+      args.add("-Dorg.lwjgl.librarypath=$versionDir${sep}natives");
     }
     
     args.add(manifest['mainClass']);
@@ -419,7 +457,6 @@ class MinecraftCore {
     if (!finalGameArgs.contains('--version')) finalGameArgs.addAll(['--version', jarVersion]);
     if (!finalGameArgs.contains('--gameDir')) finalGameArgs.addAll(['--gameDir', executionDir]);
     
-    // FIX: Explictly enforce assetsDir and assetIndex in case Fabric/Forge manifests stripped them out
     if (!finalGameArgs.contains('--assetsDir')) finalGameArgs.addAll(['--assetsDir', resolvedAssetsDir]);
     if (!finalGameArgs.contains('--assetIndex')) finalGameArgs.addAll(['--assetIndex', manifest['assetIndex']?['id'] ?? "legacy"]);
 

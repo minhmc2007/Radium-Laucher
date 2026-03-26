@@ -1,4 +1,5 @@
-//launcher_ui.dart
+// Radium Launcher Flutter UI: app shell, home/settings screens, version and profile
+// modals, auth flow, download matrix, and shared visual components (glass cards, atmosphere).
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';

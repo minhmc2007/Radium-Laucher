@@ -1,4 +1,5 @@
-//launcher_state.dart 
+// Central launcher state: auth, selected version/engine, global and per-profile settings
+// persistence, managed Java list, and orchestration of local game launch via MinecraftCore.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
