@@ -91,31 +91,36 @@ class _MainLayoutState extends State<MainLayout> with SingleTickerProviderStateM
       decoration: BoxDecoration(border: Border(right: BorderSide(color: Colors.white.withOpacity(0.05)))),
       child: Column(
         children:[
-          Container(
-            width: 48, height: 48,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              boxShadow:[BoxShadow(color: state.currentEngineColor.withOpacity(0.5), blurRadius: 20)],
-              gradient: RadialGradient(colors:[state.currentEngineColor, state.currentEngineColor.withOpacity(0.2)]),
+          HoverAnimatedScale(
+            scale: 1.1,
+            child: Container(
+              width: 48, height: 48,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                boxShadow:[BoxShadow(color: state.currentEngineColor.withOpacity(0.5), blurRadius: 20)],
+                gradient: RadialGradient(colors:[state.currentEngineColor, state.currentEngineColor.withOpacity(0.2)]),
+              ),
+              child: Center(child: Text("R", style: GoogleFonts.unbounded(fontWeight: FontWeight.w900, fontSize: 24, color: Colors.black87))),
             ),
-            child: Center(child: Text("R", style: GoogleFonts.unbounded(fontWeight: FontWeight.w900, fontSize: 24, color: Colors.black87))),
           ),
           const Spacer(),
           _NavIcon(icon: Icons.dashboard_rounded, isSelected: _currentIndex == 0, accent: state.currentEngineColor, onTap: () => setState(() => _currentIndex = 0)),
           const SizedBox(height: 32),
           _NavIcon(icon: Icons.tune_rounded, isSelected: _currentIndex == 1, accent: state.currentEngineColor, onTap: () => setState(() => _currentIndex = 1)),
           const Spacer(),
-          GestureDetector(
-            onTap: () => showDialog(context: context, builder: (ctx) => AccountManagerModal(state: state)),
-            child: CircleAvatar(
-              radius: 20,
-              backgroundColor: Colors.white.withOpacity(0.1),
-              backgroundImage: state.isAuthenticated && state.authMode == AuthMode.microsoft 
-                  ? NetworkImage("https://minotar.net/helm/${state.uuid}/64.png") 
-                  : null,
-              child: (!state.isAuthenticated || state.authMode == AuthMode.offline) 
-                  ? Icon(state.isAuthenticated ? Icons.person : Icons.person_off, color: state.isAuthenticated ? Colors.white : Colors.white38, size: 20)
-                  : null,
+          HoverAnimatedScale(
+            child: GestureDetector(
+              onTap: () => AnimatedDialog.show(context, AccountManagerModal(state: state)),
+              child: CircleAvatar(
+                radius: 20,
+                backgroundColor: Colors.white.withOpacity(0.1),
+                backgroundImage: state.isAuthenticated && state.authMode == AuthMode.microsoft 
+                    ? NetworkImage("https://minotar.net/helm/${state.uuid}/64.png") 
+                    : null,
+                child: (!state.isAuthenticated || state.authMode == AuthMode.offline) 
+                    ? Icon(state.isAuthenticated ? Icons.person : Icons.person_off, color: state.isAuthenticated ? Colors.white : Colors.white38, size: 20)
+                    : null,
+              ),
             ),
           )
         ],
@@ -149,107 +154,137 @@ class HomeView extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children:[
-          Text("RADIUM", style: GoogleFonts.unbounded(fontSize: 64, fontWeight: FontWeight.w900, letterSpacing: 4, color: Colors.white)),
-          Text("A D V A N C E D   E X E C U T I O N   C O R E", style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w700, letterSpacing: 4, color: state.currentEngineColor)),
+          StaggeredEntrance(delayMs: 0, child: Text("RADIUM", style: GoogleFonts.unbounded(fontSize: 64, fontWeight: FontWeight.w900, letterSpacing: 4, color: Colors.white))),
+          StaggeredEntrance(delayMs: 50, child: Text("A D V A N C E D   E X E C U T I O N   C O R E", style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w700, letterSpacing: 4, color: state.currentEngineColor))),
 
           SizedBox(height: math.max(32.0, constraints.maxHeight * 0.08)),
 
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            decoration: BoxDecoration(
-              color: state.currentEngineColor.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: state.currentEngineColor.withOpacity(0.3)),
+          StaggeredEntrance(
+            delayMs: 100,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: state.currentEngineColor.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: state.currentEngineColor.withOpacity(0.3)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children:[
+                  Icon(Icons.bolt, color: state.currentEngineColor, size: 16),
+                  const SizedBox(width: 8),
+                  Text(
+                    "${state.selectedEngine.name.toUpperCase()} ENGINE DETECTED",
+                    style: GoogleFonts.plusJakartaSans(color: state.currentEngineColor, fontWeight: FontWeight.w800, fontSize: 12, letterSpacing: 2),
+                  ),
+                ],
+              ),
             ),
+          ),
+          
+          const SizedBox(height: 16),
+          
+          StaggeredEntrance(
+            delayMs: 150,
             child: Row(
-              mainAxisSize: MainAxisSize.min,
               children:[
-                Icon(Icons.bolt, color: state.currentEngineColor, size: 16),
-                const SizedBox(width: 8),
-                Text(
-                  "${state.selectedEngine.name.toUpperCase()} ENGINE DETECTED",
-                  style: GoogleFonts.plusJakartaSans(color: state.currentEngineColor, fontWeight: FontWeight.w800, fontSize: 12, letterSpacing: 2),
+                Expanded(
+                  child: GlassCard(
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String>(
+                        isExpanded: true,
+                        value: state.availableVersions.contains(state.selectedVersion) ? state.selectedVersion : null,
+                        dropdownColor: const Color(0xFF111111),
+                        icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white54),
+                        style: GoogleFonts.unbounded(color: Colors.white70, fontWeight: FontWeight.w600, fontSize: 16),
+                        items: state.availableVersions.map((e) {
+                          return DropdownMenuItem(value: e, child: Text(e));
+                        }).toList(),
+                        onChanged: (val) { if (val != null) state.setVersionAndAutoDetect(val); },
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                HoverAnimatedScale(
+                  child: GestureDetector(
+                    onTap: () => AnimatedDialog.show(context, ProfileSettingsModal(state: state)),
+                    child: const GlassCard(
+                      padding: EdgeInsets.all(22),
+                      child: Icon(Icons.settings, color: Colors.white70, size: 24),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                HoverAnimatedScale(
+                  child: GestureDetector(
+                    onTap: () => AnimatedDialog.show(context, VersionDownloaderModal(state: state)),
+                    child: const GlassCard(
+                      padding: EdgeInsets.all(22),
+                      child: Icon(Icons.download, color: Colors.white70, size: 24),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                HoverAnimatedScale(
+                  child: GestureDetector(
+                    onTap: () => AnimatedDialog.show(context, ProfileCreatorModal(state: state)),
+                    child: const GlassCard(
+                      padding: EdgeInsets.all(22),
+                      child: Icon(Icons.create_new_folder, color: Colors.white70, size: 24),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                HoverAnimatedScale(
+                  child: GestureDetector(
+                    onTap: () {
+                      if (state.selectedVersion == "No versions found" || state.isLaunching) return;
+                      AnimatedDialog.show(
+                        context, 
+                        ConfirmDeleteModal(
+                          title: "DELETE VERSION",
+                          message: "Are you sure you want to permanently delete '${state.selectedVersion}'?\nThis will wipe all related client files and isolated mods.",
+                          onConfirm: () => state.deleteCurrentVersion(),
+                        )
+                      );
+                    },
+                    child: GlassCard(
+                      padding: const EdgeInsets.all(22),
+                      child: Icon(Icons.delete_outline, color: Colors.redAccent.withOpacity(0.8), size: 24),
+                    ),
+                  ),
                 ),
               ],
             ),
           ),
           
-          const SizedBox(height: 16),
-          
-          Row(
-            children:[
-              Expanded(
-                child: GlassCard(
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<String>(
-                      isExpanded: true,
-                      value: state.availableVersions.contains(state.selectedVersion) ? state.selectedVersion : null,
-                      dropdownColor: const Color(0xFF111111),
-                      icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white54),
-                      style: GoogleFonts.unbounded(color: Colors.white70, fontWeight: FontWeight.w600, fontSize: 16),
-                      items: state.availableVersions.map((e) {
-                        return DropdownMenuItem(value: e, child: Text(e));
-                      }).toList(),
-                      onChanged: (val) { if (val != null) state.setVersionAndAutoDetect(val); },
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 16),
-              GestureDetector(
-                onTap: () => showDialog(context: context, builder: (ctx) => ProfileSettingsModal(state: state)),
-                child: const GlassCard(
-                  padding: EdgeInsets.all(22),
-                  child: Icon(Icons.settings, color: Colors.white70, size: 24),
-                ),
-              ),
-              const SizedBox(width: 16),
-              GestureDetector(
-                onTap: () => showDialog(context: context, builder: (ctx) => VersionDownloaderModal(state: state)),
-                child: const GlassCard(
-                  padding: EdgeInsets.all(22),
-                  child: Icon(Icons.download, color: Colors.white70, size: 24),
-                ),
-              ),
-              const SizedBox(width: 16),
-              GestureDetector(
-                onTap: () => showDialog(context: context, builder: (ctx) => ProfileCreatorModal(state: state)),
-                child: const GlassCard(
-                  padding: EdgeInsets.all(22),
-                  child: Icon(Icons.create_new_folder, color: Colors.white70, size: 24),
-                ),
-              ),
-              const SizedBox(width: 16),
-              GestureDetector(
-                onTap: () => state.deleteCurrentVersion(),
-                child: GlassCard(
-                  padding: const EdgeInsets.all(22),
-                  child: Icon(Icons.delete_outline, color: Colors.redAccent.withOpacity(0.8), size: 24),
-                ),
-              ),
-            ],
-          ),
-          
           if (displayName != state.selectedVersion)
-            Padding(
-              padding: const EdgeInsets.only(top: 12.0, left: 8.0),
-              child: Text("Active Profile Name: $displayName", style: GoogleFonts.plusJakartaSans(color: Colors.white54, fontWeight: FontWeight.bold, fontSize: 12)),
+            StaggeredEntrance(
+              delayMs: 180,
+              child: Padding(
+                padding: const EdgeInsets.only(top: 12.0, left: 8.0),
+                child: Text("Active Profile Name: $displayName", style: GoogleFonts.plusJakartaSans(color: Colors.white54, fontWeight: FontWeight.bold, fontSize: 12)),
+              ),
             ),
 
           const SizedBox(height: 32),
           
-          LaunchLocalButton(state: state),
+          StaggeredEntrance(delayMs: 200, child: LaunchLocalButton(state: state)),
           
           const SizedBox(height: 16),
           if (state.isLaunching || state.launchStatus.contains("ERROR") || state.launchStatus.contains("CRASH"))
-             Text(
-               state.launchStatus,
-               style: GoogleFonts.plusJakartaSans(
-                 color: (state.launchStatus.contains("ERROR") || state.launchStatus.contains("CRASH")) ? Colors.redAccent : Colors.white,
-                 fontWeight: FontWeight.bold,
-                 fontSize: 12,
-                 letterSpacing: 1.5,
+             StaggeredEntrance(
+               delayMs: 0,
+               child: Text(
+                 state.launchStatus,
+                 style: GoogleFonts.plusJakartaSans(
+                   color: (state.launchStatus.contains("ERROR") || state.launchStatus.contains("CRASH")) ? Colors.redAccent : Colors.white,
+                   fontWeight: FontWeight.bold,
+                   fontSize: 12,
+                   letterSpacing: 1.5,
+                 ),
                ),
              )
                 ],
@@ -1062,9 +1097,28 @@ class _VersionDownloaderModalState extends State<VersionDownloaderModal> {
 // AESTHETIC COMPONENTS & LAUNCH BUTTON
 // ==========================================
 
-class LaunchLocalButton extends StatelessWidget {
+class LaunchLocalButton extends StatefulWidget {
   final LauncherState state;
   const LaunchLocalButton({super.key, required this.state});
+
+  @override
+  State<LaunchLocalButton> createState() => _LaunchLocalButtonState();
+}
+
+class _LaunchLocalButtonState extends State<LaunchLocalButton> with SingleTickerProviderStateMixin {
+  late AnimationController _breathCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _breathCtrl = AnimationController(vsync: this, duration: const Duration(seconds: 2))..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _breathCtrl.dispose();
+    super.dispose();
+  }
 
   Future<bool> _isJavaValid(String path) async {
     if (path.toLowerCase() == "system default" || path.toLowerCase() == "auto-detect" || path.isEmpty) {
@@ -1080,64 +1134,72 @@ class LaunchLocalButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () async {
-        if (!state.isAuthenticated) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("AUTHENTICATION REQUIRED", style: GoogleFonts.unbounded())));
-          return;
-        }
-
-        // --- NEW: Verify Java Environment ---
-        bool validJava = await _isJavaValid(state.resolveActiveJavaPath());
-        if (!validJava) {
-          if (context.mounted) {
-            showDialog(context: context, builder: (ctx) => JavaMissingModal(state: state));
+    return HoverAnimatedScale(
+      scale: 1.03,
+      child: GestureDetector(
+        onTap: () async {
+          if (!widget.state.isAuthenticated) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("AUTHENTICATION REQUIRED", style: GoogleFonts.unbounded())));
+            return;
           }
-          return;
-        }
-        
-        state.launchGameLocal();
-      },
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 400),
-        curve: Curves.easeOutCirc,
-        height: 80,
-        width: state.isLaunching ? 400 : 300,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(40),
-          boxShadow:[if (!state.isLaunching) BoxShadow(color: state.currentEngineColor.withOpacity(0.3), blurRadius: 40, offset: const Offset(0, 10))],
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(40),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-            child: Container(
-              decoration: BoxDecoration(
-                color: state.isLaunching ? state.currentEngineColor.withOpacity(0.15) : Colors.white.withOpacity(0.05),
-                border: Border.all(color: state.currentEngineColor.withOpacity(0.5), width: 1.5),
-                borderRadius: BorderRadius.circular(40),
-              ),
-              child: Stack(
-                alignment: Alignment.center,
-                children:[
-                  if (state.isLaunching)
-                    Positioned(
-                      left: 0, top: 0, bottom: 0,
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 300),
-                        width: 400 * state.launchProgress,
-                        decoration: BoxDecoration(color: state.currentEngineColor.withOpacity(0.2), borderRadius: BorderRadius.circular(40)),
-                      ),
-                    ),
-                  AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 300),
-                    child: Text(
-                      state.isLaunching ? "INITIALIZING..." : "PLAY GAME",
-                      key: ValueKey(state.isLaunching),
-                      style: GoogleFonts.unbounded(fontSize: 16, fontWeight: FontWeight.w800, letterSpacing: 4, color: state.isLaunching ? Colors.white : state.currentEngineColor),
-                    ),
+
+          bool validJava = await _isJavaValid(widget.state.resolveActiveJavaPath());
+          if (!validJava) {
+            if (context.mounted) AnimatedDialog.show(context, JavaMissingModal(state: widget.state));
+            return;
+          }
+          
+          widget.state.launchGameLocal();
+        },
+        child: AnimatedBuilder(
+          animation: _breathCtrl,
+          builder: (ctx, child) {
+            // Apply breathing scale ONLY when not launching
+            final breathScale = widget.state.isLaunching ? 1.0 : 1.0 + (_breathCtrl.value * 0.015);
+            return Transform.scale(scale: breathScale, child: child);
+          },
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 400),
+            curve: Curves.easeOutCirc,
+            height: 80,
+            width: widget.state.isLaunching ? 400 : 300,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(40),
+              boxShadow:[if (!widget.state.isLaunching) BoxShadow(color: widget.state.currentEngineColor.withOpacity(0.3), blurRadius: 40, offset: const Offset(0, 10))],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(40),
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: widget.state.isLaunching ? widget.state.currentEngineColor.withOpacity(0.15) : Colors.white.withOpacity(0.05),
+                    border: Border.all(color: widget.state.currentEngineColor.withOpacity(0.5), width: 1.5),
+                    borderRadius: BorderRadius.circular(40),
                   ),
-                ],
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children:[
+                      if (widget.state.isLaunching)
+                        Positioned(
+                          left: 0, top: 0, bottom: 0,
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 300),
+                            width: 400 * widget.state.launchProgress,
+                            decoration: BoxDecoration(color: widget.state.currentEngineColor.withOpacity(0.2), borderRadius: BorderRadius.circular(40)),
+                          ),
+                        ),
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 300),
+                        child: Text(
+                          widget.state.isLaunching ? "INITIALIZING..." : "PLAY GAME",
+                          key: ValueKey(widget.state.isLaunching),
+                          style: GoogleFonts.unbounded(fontSize: 16, fontWeight: FontWeight.w800, letterSpacing: 4, color: widget.state.isLaunching ? Colors.white : widget.state.currentEngineColor),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ),
           ),
@@ -1321,8 +1383,19 @@ class _AccountManagerModalState extends State<AccountManagerModal> {
                       IconButton(
                         icon: const Icon(Icons.delete_outline, color: Colors.white38),
                         onPressed: () {
-                          setState(() => widget.state.removeAccount(acc['uuid']));
-                          if (widget.state.savedAccounts.isEmpty) setState(() => isAddingNew = true);
+                          AnimatedDialog.show(
+                            context,
+                            ConfirmDeleteModal(
+                              title: "REMOVE ACCOUNT",
+                              message: "Are you sure you want to remove the account '${acc['username']}' from the launcher?",
+                              onConfirm: () {
+                                setState(() => widget.state.removeAccount(acc['uuid']));
+                                if (widget.state.savedAccounts.isEmpty) {
+                                  setState(() => isAddingNew = true);
+                                }
+                              },
+                            )
+                          );
                         },
                       ),
                     ],
@@ -1442,13 +1515,15 @@ class _NavIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 300),
-        width: 48, height: 48,
-        decoration: BoxDecoration(color: isSelected ? accent.withOpacity(0.15) : Colors.transparent, borderRadius: BorderRadius.circular(16), border: Border.all(color: isSelected ? accent.withOpacity(0.5) : Colors.transparent)),
-        child: Icon(icon, color: isSelected ? accent : Colors.white54, size: 24),
+    return HoverAnimatedScale(
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 300),
+          width: 48, height: 48,
+          decoration: BoxDecoration(color: isSelected ? accent.withOpacity(0.15) : Colors.transparent, borderRadius: BorderRadius.circular(16), border: Border.all(color: isSelected ? accent.withOpacity(0.5) : Colors.transparent)),
+          child: Icon(icon, color: isSelected ? accent : Colors.white54, size: 24),
+        ),
       ),
     );
   }
@@ -1610,6 +1685,177 @@ class _JavaMissingModalState extends State<JavaMissingModal> {
           ),
         ),
       ),
+    );
+  }
+}
+
+// ==========================================
+// CONFIRMATION DIALOG
+// ==========================================
+
+class ConfirmDeleteModal extends StatelessWidget {
+  final String title;
+  final String message;
+  final VoidCallback onConfirm;
+
+  const ConfirmDeleteModal({
+    super.key,
+    required this.title,
+    required this.message,
+    required this.onConfirm,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Material(
+        color: Colors.transparent,
+        child: GlassCard(
+          padding: const EdgeInsets.all(40),
+          child: SizedBox(
+            width: 400,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children:[
+                const Icon(Icons.delete_forever_rounded, color: Colors.redAccent, size: 48),
+                const SizedBox(height: 16),
+                Text(title, style: GoogleFonts.unbounded(fontSize: 18, fontWeight: FontWeight.w900, color: Colors.white)),
+                const SizedBox(height: 16),
+                Text(
+                  message,
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.plusJakartaSans(color: Colors.white70, fontSize: 14),
+                ),
+                const SizedBox(height: 32),
+                Row(
+                  children:[
+                    Expanded(
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.white.withOpacity(0.1),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        onPressed: () => Navigator.pop(context),
+                        child: Text("CANCEL", style: GoogleFonts.unbounded(fontWeight: FontWeight.bold, letterSpacing: 1, fontSize: 12)),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.redAccent,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        onPressed: () {
+                          Navigator.pop(context); // Close the dialog
+                          onConfirm();            // Execute delete
+                        },
+                        child: Text("DELETE", style: GoogleFonts.unbounded(fontWeight: FontWeight.w900, letterSpacing: 1, fontSize: 12)),
+                      ),
+                    ),
+                  ],
+                )
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ==========================================
+// FLUID ANIMATION UTILITIES
+// ==========================================
+
+class HoverAnimatedScale extends StatefulWidget {
+  final Widget child;
+  final double scale;
+  const HoverAnimatedScale({super.key, required this.child, this.scale = 1.05});
+
+  @override
+  State<HoverAnimatedScale> createState() => _HoverAnimatedScaleState();
+}
+
+class _HoverAnimatedScaleState extends State<HoverAnimatedScale> {
+  bool isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (_) => setState(() => isHovered = true),
+      onExit: (_) => setState(() => isHovered = false),
+      cursor: SystemMouseCursors.click,
+      child: AnimatedScale(
+        scale: isHovered ? widget.scale : 1.0,
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOutBack,
+        child: widget.child,
+      ),
+    );
+  }
+}
+
+class StaggeredEntrance extends StatefulWidget {
+  final Widget child;
+  final int delayMs;
+  const StaggeredEntrance({super.key, required this.child, this.delayMs = 0});
+
+  @override
+  State<StaggeredEntrance> createState() => _StaggeredEntranceState();
+}
+
+class _StaggeredEntranceState extends State<StaggeredEntrance> with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  late Animation<double> _anim;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 700));
+    _anim = CurvedAnimation(parent: _ctrl, curve: Curves.easeOutExpo);
+    Future.delayed(Duration(milliseconds: widget.delayMs), () {
+      if (mounted) _ctrl.forward();
+    });
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: _anim,
+      child: SlideTransition(
+        position: Tween<Offset>(begin: const Offset(0, 0.15), end: Offset.zero).animate(_anim),
+        child: widget.child,
+      ),
+    );
+  }
+}
+
+class AnimatedDialog {
+  static void show(BuildContext context, Widget dialog) {
+    showGeneralDialog(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: "Dismiss",
+      barrierColor: Colors.black.withOpacity(0.6),
+      transitionDuration: const Duration(milliseconds: 400),
+      pageBuilder: (context, animation1, animation2) => dialog,
+      transitionBuilder: (context, a1, a2, child) {
+        return Transform.scale(
+          scale: Curves.easeOutBack.transform(a1.value),
+          child: Opacity(opacity: a1.value, child: child),
+        );
+      },
     );
   }
 }
