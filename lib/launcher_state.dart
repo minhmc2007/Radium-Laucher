@@ -16,8 +16,12 @@ class LauncherState extends ChangeNotifier {
   String uuid = "";
   String accessToken = "";
   String userType = "";
+  String? msRefreshToken; 
   AuthMode authMode = AuthMode.offline;
   bool isAuthenticated = false;
+
+  // --- NEW: Account List ---
+  List<Map<String, dynamic>> savedAccounts =[];
 
   GameEngine selectedEngine = GameEngine.vanilla;
   String selectedVersion = "Loading...";
@@ -68,8 +72,93 @@ class LauncherState extends ChangeNotifier {
         globalJavaPath = data['globalJavaPath'] ?? "Auto-Detect";
         caperUrl = data['caperUrl'] ?? "https://example.com/capes";
         showSnapshots = data['showSnapshots'] ?? false;
+
+        // AUTH CACHE LOADING
+        if (data['savedAccounts'] != null) {
+          savedAccounts = List<Map<String, dynamic>>.from(data['savedAccounts'].map((e) => Map<String, dynamic>.from(e)));
+        }
+
+        if (data['isAuthenticated'] == true) {
+          isAuthenticated = true;
+          authMode = data['authMode'] == 'AuthMode.microsoft' ? AuthMode.microsoft : AuthMode.offline;
+          username = data['username'];
+          uuid = data['uuid'] ?? "";
+          accessToken = data['accessToken'] ?? "";
+          userType = data['userType'] ?? "";
+          msRefreshToken = data['msRefreshToken'];
+
+          // Auto-Refresh Active Microsoft Token
+          if (authMode == AuthMode.microsoft && msRefreshToken != null) {
+            try {
+              final newMs = await AuthCore.refreshMicrosoftToken(msRefreshToken!);
+              if (newMs['access_token'] != null) {
+                final mcData = await AuthCore.authenticateMinecraft(newMs['access_token']);
+                username = mcData['username'] as String?;
+                uuid = mcData['uuid'] as String;
+                accessToken = mcData['accessToken'] as String;
+                userType = mcData['userType'] as String;
+                msRefreshToken = newMs['refresh_token'] ?? msRefreshToken;
+                
+                // Update the token in the saved accounts list too
+                _updateAccountInList();
+                saveGlobalSettings(); 
+              } else {
+                isAuthenticated = false; 
+              }
+            } catch (e) {
+              isAuthenticated = false; 
+            }
+          }
+        }
       } catch (_) {}
     }
+  }
+
+  void _updateAccountInList() {
+    final idx = savedAccounts.indexWhere((a) => a['uuid'] == uuid);
+    if (idx >= 0) {
+      savedAccounts[idx] = {
+        'username': username,
+        'uuid': uuid,
+        'accessToken': accessToken,
+        'userType': userType,
+        'authMode': authMode.toString(),
+        'msRefreshToken': msRefreshToken,
+      };
+    }
+  }
+
+  void addOrUpdateAccount(Map<String, dynamic> acc) {
+    final idx = savedAccounts.indexWhere((a) => a['uuid'] == acc['uuid']);
+    if (idx >= 0) {
+      savedAccounts[idx] = acc;
+    } else {
+      savedAccounts.add(acc);
+    }
+    switchAccount(acc['uuid']); // Auto switch to newly added account
+  }
+
+  void switchAccount(String targetUuid) {
+    final acc = savedAccounts.firstWhere((a) => a['uuid'] == targetUuid, orElse: () => <String, dynamic>{});
+    if (acc.isNotEmpty) {
+      username = acc['username'];
+      uuid = acc['uuid'];
+      accessToken = acc['accessToken'];
+      userType = acc['userType'];
+      authMode = acc['authMode'] == 'AuthMode.microsoft' ? AuthMode.microsoft : AuthMode.offline;
+      msRefreshToken = acc['msRefreshToken'];
+      isAuthenticated = true;
+      saveGlobalSettings();
+    }
+  }
+
+  void removeAccount(String targetUuid) {
+    savedAccounts.removeWhere((a) => a['uuid'] == targetUuid);
+    if (uuid == targetUuid) {
+      isAuthenticated = false; // We deleted the active account
+      if (savedAccounts.isNotEmpty) switchAccount(savedAccounts.first['uuid']);
+    }
+    saveGlobalSettings();
   }
 
   Future<void> saveGlobalSettings() async {
@@ -79,7 +168,15 @@ class LauncherState extends ChangeNotifier {
       'globalRamGB': globalRamGB,
       'globalJavaPath': globalJavaPath,
       'caperUrl': caperUrl,
-      'showSnapshots': showSnapshots
+      'showSnapshots': showSnapshots,
+      'savedAccounts': savedAccounts,
+      'isAuthenticated': isAuthenticated,
+      'authMode': authMode.toString(),
+      'username': username,
+      'uuid': uuid,
+      'accessToken': accessToken,
+      'userType': userType,
+      'msRefreshToken': msRefreshToken,
     }));
     notifyListeners();
   }

@@ -106,11 +106,16 @@ class _MainLayoutState extends State<MainLayout> with SingleTickerProviderStateM
           _NavIcon(icon: Icons.tune_rounded, isSelected: _currentIndex == 1, accent: state.currentEngineColor, onTap: () => setState(() => _currentIndex = 1)),
           const Spacer(),
           GestureDetector(
-            onTap: () => showDialog(context: context, builder: (ctx) => AuthModal(state: state)),
+            onTap: () => showDialog(context: context, builder: (ctx) => AccountManagerModal(state: state)),
             child: CircleAvatar(
               radius: 20,
               backgroundColor: Colors.white.withOpacity(0.1),
-              child: Icon(state.isAuthenticated ? Icons.person : Icons.person_off, color: state.isAuthenticated ? Colors.white : Colors.white38, size: 20),
+              backgroundImage: state.isAuthenticated && state.authMode == AuthMode.microsoft 
+                  ? NetworkImage("https://minotar.net/helm/${state.uuid}/64.png") 
+                  : null,
+              child: (!state.isAuthenticated || state.authMode == AuthMode.offline) 
+                  ? Icon(state.isAuthenticated ? Icons.person : Icons.person_off, color: state.isAuthenticated ? Colors.white : Colors.white38, size: 20)
+                  : null,
             ),
           )
         ],
@@ -1061,14 +1066,36 @@ class LaunchLocalButton extends StatelessWidget {
   final LauncherState state;
   const LaunchLocalButton({super.key, required this.state});
 
+  Future<bool> _isJavaValid(String path) async {
+    if (path.toLowerCase() == "system default" || path.toLowerCase() == "auto-detect" || path.isEmpty) {
+      try {
+        final res = await Process.run('java', ['-version']);
+        return res.exitCode == 0;
+      } catch (e) {
+        return false;
+      }
+    }
+    return File(path).existsSync();
+  }
+
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: () {
+      onTap: () async {
         if (!state.isAuthenticated) {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("AUTHENTICATION REQUIRED", style: GoogleFonts.unbounded())));
           return;
         }
+
+        // --- NEW: Verify Java Environment ---
+        bool validJava = await _isJavaValid(state.resolveActiveJavaPath());
+        if (!validJava) {
+          if (context.mounted) {
+            showDialog(context: context, builder: (ctx) => JavaMissingModal(state: state));
+          }
+          return;
+        }
+        
         state.launchGameLocal();
       },
       child: AnimatedContainer(
@@ -1121,22 +1148,32 @@ class LaunchLocalButton extends StatelessWidget {
 }
 
 // ==========================================
-// REAL MICROSOFT & OFFLINE AUTH FLOW UI
+// REAL MICROSOFT & OFFLINE ACCOUNT MANAGER
 // ==========================================
 
-class AuthModal extends StatefulWidget {
+class AccountManagerModal extends StatefulWidget {
   final LauncherState state;
-  const AuthModal({super.key, required this.state});
+  const AccountManagerModal({super.key, required this.state});
 
   @override
-  State<AuthModal> createState() => _AuthModalState();
+  State<AccountManagerModal> createState() => _AccountManagerModalState();
 }
 
-class _AuthModalState extends State<AuthModal> {
+class _AccountManagerModalState extends State<AccountManagerModal> {
   bool isAuthenticating = false;
+  bool isAddingNew = false;
   String statusText = "";
   String deviceCodeStr = "";
   String verificationUrl = "";
+
+  @override
+  void initState() {
+    super.initState();
+    // Default to the "Add" screen if there are no accounts saved
+    if (widget.state.savedAccounts.isEmpty) {
+      isAddingNew = true;
+    }
+  }
 
   Future<void> _doMicrosoftAuth() async {
     setState(() => isAuthenticating = true);
@@ -1156,14 +1193,15 @@ class _AuthModalState extends State<AuthModal> {
           setState(() => statusText = "SECURING XBOX LIVE...");
           final mcData = await AuthCore.authenticateMinecraft(tokenRes['access_token']);
           
-          widget.state.updateSettings(() {
-            widget.state.authMode = AuthMode.microsoft;
-            widget.state.isAuthenticated = true;
-            widget.state.username = mcData['username'] as String;
-            widget.state.uuid = mcData['uuid'] as String;
-            widget.state.accessToken = mcData['accessToken'] as String;
-            widget.state.userType = mcData['userType'] as String;
+          widget.state.addOrUpdateAccount({
+            'username': mcData['username'] as String,
+            'uuid': mcData['uuid'] as String,
+            'accessToken': mcData['accessToken'] as String,
+            'userType': mcData['userType'] as String,
+            'authMode': AuthMode.microsoft.toString(),
+            'msRefreshToken': tokenRes['refresh_token'] as String?,
           });
+          
           if (mounted) Navigator.pop(context);
         } else if (tokenRes['error'] != 'authorization_pending') {
           throw Exception(tokenRes['error_description']);
@@ -1177,14 +1215,16 @@ class _AuthModalState extends State<AuthModal> {
   void _doOfflineAuth(String name) {
     if (name.isEmpty) return;
     final data = AuthCore.generateOfflineAccount(name);
-    widget.state.updateSettings(() {
-      widget.state.authMode = AuthMode.offline;
-      widget.state.isAuthenticated = true;
-      widget.state.username = data['username']!;
-      widget.state.uuid = data['uuid']!;
-      widget.state.accessToken = data['accessToken']!;
-      widget.state.userType = data['userType']!;
+    
+    widget.state.addOrUpdateAccount({
+      'username': data['username']!,
+      'uuid': data['uuid']!,
+      'accessToken': data['accessToken']!,
+      'userType': data['userType']!,
+      'authMode': AuthMode.offline.toString(),
+      'msRefreshToken': null,
     });
+    
     Navigator.pop(context);
   }
 
@@ -1196,8 +1236,10 @@ class _AuthModalState extends State<AuthModal> {
         child: GlassCard(
           padding: const EdgeInsets.all(40),
           child: SizedBox(
-            width: 400,
-            child: isAuthenticating ? _buildLoading() : _buildSelection(),
+            width: 450,
+            child: isAuthenticating 
+              ? _buildLoading() 
+              : (isAddingNew ? _buildAddAccount() : _buildAccountList()),
           ),
         ),
       ),
@@ -1207,7 +1249,7 @@ class _AuthModalState extends State<AuthModal> {
   Widget _buildLoading() {
     return Column(
       mainAxisSize: MainAxisSize.min,
-      children:[
+      children: [
         if (deviceCodeStr.isNotEmpty) ...[
           Text(deviceCodeStr, style: GoogleFonts.unbounded(fontSize: 32, color: widget.state.currentEngineColor, fontWeight: FontWeight.bold)),
           const SizedBox(height: 16),
@@ -1219,12 +1261,117 @@ class _AuthModalState extends State<AuthModal> {
     );
   }
 
-  Widget _buildSelection() {
+  Widget _buildAccountList() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children:[
+            Text("ACCOUNT MANAGER", style: GoogleFonts.unbounded(fontSize: 18, fontWeight: FontWeight.w900, color: Colors.white)),
+            Text("${widget.state.savedAccounts.length} SAVED", style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white54)),
+          ],
+        ),
+        const SizedBox(height: 24),
+        
+        Container(
+          constraints: const BoxConstraints(maxHeight: 300),
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: widget.state.savedAccounts.length,
+            itemBuilder: (ctx, i) {
+              final acc = widget.state.savedAccounts[i];
+              final isMicrosoft = acc['authMode'] == AuthMode.microsoft.toString();
+              final isActive = widget.state.uuid == acc['uuid'];
+
+              return Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                decoration: BoxDecoration(
+                  color: isActive ? widget.state.currentEngineColor.withOpacity(0.1) : Colors.white.withOpacity(0.05),
+                  border: Border.all(color: isActive ? widget.state.currentEngineColor.withOpacity(0.5) : Colors.white12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: ListTile(
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  leading: CircleAvatar(
+                    radius: 20,
+                    backgroundColor: Colors.black26,
+                    backgroundImage: isMicrosoft ? NetworkImage("https://minotar.net/helm/${acc['uuid']}/64.png") : null,
+                    child: !isMicrosoft ? const Icon(Icons.person, color: Colors.white54) : null,
+                  ),
+                  title: Text(acc['username'], style: GoogleFonts.plusJakartaSans(color: Colors.white, fontWeight: FontWeight.bold)),
+                  subtitle: Row(
+                    children:[
+                      Icon(isMicrosoft ? Icons.window : Icons.wifi_off, size: 12, color: isMicrosoft ? const Color(0xFF00A4EF) : Colors.white38),
+                      const SizedBox(width: 4),
+                      Text(isMicrosoft ? "Microsoft Authentication" : "Offline Account", style: GoogleFonts.plusJakartaSans(color: isMicrosoft ? const Color(0xFF00A4EF) : Colors.white38, fontSize: 10, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children:[
+                      if (isActive)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          margin: const EdgeInsets.only(right: 12),
+                          decoration: BoxDecoration(color: widget.state.currentEngineColor, borderRadius: BorderRadius.circular(4)),
+                          child: Text("ACTIVE", style: GoogleFonts.unbounded(fontSize: 8, color: Colors.black, fontWeight: FontWeight.bold)),
+                        ),
+                      IconButton(
+                        icon: const Icon(Icons.delete_outline, color: Colors.white38),
+                        onPressed: () {
+                          setState(() => widget.state.removeAccount(acc['uuid']));
+                          if (widget.state.savedAccounts.isEmpty) setState(() => isAddingNew = true);
+                        },
+                      ),
+                    ],
+                  ),
+                  onTap: () {
+                    widget.state.switchAccount(acc['uuid']);
+                    Navigator.pop(context);
+                  },
+                ),
+              );
+            },
+          ),
+        ),
+        
+        const SizedBox(height: 16),
+        SizedBox(
+          width: double.infinity,
+          child: ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.white.withOpacity(0.05),
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            icon: const Icon(Icons.add, size: 18),
+            label: Text("ADD NEW ACCOUNT", style: GoogleFonts.unbounded(fontWeight: FontWeight.bold, fontSize: 12)),
+            onPressed: () => setState(() => isAddingNew = true),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAddAccount() {
     final offlineController = TextEditingController();
     return Column(
       mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
       children:[
-        Text("AUTHENTICATION", style: GoogleFonts.unbounded(fontSize: 20, fontWeight: FontWeight.w800, color: Colors.white)),
+        Row(
+          children:[
+            if (widget.state.savedAccounts.isNotEmpty)
+              IconButton(
+                icon: const Icon(Icons.arrow_back, color: Colors.white54),
+                onPressed: () => setState(() => isAddingNew = false),
+              ),
+            Text("ADD ACCOUNT", style: GoogleFonts.unbounded(fontSize: 18, fontWeight: FontWeight.w900, color: Colors.white)),
+          ],
+        ),
         const SizedBox(height: 32),
         InkWell(
           onTap: _doMicrosoftAuth,
@@ -1359,4 +1506,110 @@ class GridPainter extends CustomPainter {
   }
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+// ==========================================
+// MISSING JAVA PROMPT & AUTO-INSTALLER
+// ==========================================
+
+class JavaMissingModal extends StatefulWidget {
+  final LauncherState state;
+  const JavaMissingModal({super.key, required this.state});
+
+  @override
+  State<JavaMissingModal> createState() => _JavaMissingModalState();
+}
+
+class _JavaMissingModalState extends State<JavaMissingModal> {
+  bool isInstalling = false;
+  String status = "";
+
+  Future<void> _installJava(int version) async {
+    setState(() {
+      isInstalling = true;
+      status = "STARTING INSTALL...";
+    });
+    try {
+      await JavaManager.installTemurin(version, widget.state.minecraftDir, (msg) {
+        if (mounted) setState(() => status = msg);
+      });
+      await widget.state.refreshJavas();
+      widget.state.globalJavaPath = "Auto-Detect"; // Set back to auto-detect to find new java
+      await widget.state.saveGlobalSettings();
+      
+      if (mounted) {
+        Navigator.pop(context);
+        widget.state.launchGameLocal(); // Auto-start the game after install
+      }
+    } catch (e) {
+      if (mounted) setState(() => status = "ERROR: $e");
+      await Future.delayed(const Duration(seconds: 4));
+      if (mounted) setState(() => isInstalling = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Material(
+        color: Colors.transparent,
+        child: GlassCard(
+          padding: const EdgeInsets.all(40),
+          child: SizedBox(
+            width: 450,
+            child: isInstalling
+                ? Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children:[
+                      const CircularProgressIndicator(color: Colors.white),
+                      const SizedBox(height: 24),
+                      Text(status, textAlign: TextAlign.center, style: GoogleFonts.unbounded(fontSize: 12, color: widget.state.currentEngineColor, fontWeight: FontWeight.bold)),
+                    ],
+                  )
+                : Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children:[
+                      const Icon(Icons.warning_amber_rounded, color: Colors.orangeAccent, size: 48),
+                      const SizedBox(height: 16),
+                      Text("JAVA ENVIRONMENT MISSING", style: GoogleFonts.unbounded(fontSize: 18, fontWeight: FontWeight.w900, color: Colors.white)),
+                      const SizedBox(height: 16),
+                      Text(
+                        "No valid Java installation was found at the configured path or on your system. Minecraft requires Java to execute.",
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.plusJakartaSans(color: Colors.white70, fontSize: 14),
+                      ),
+                      const SizedBox(height: 32),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: widget.state.currentEngineColor,
+                            foregroundColor: Colors.black,
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                          onPressed: () => _installJava(21), // Target Java 21 for modern versions
+                          child: Text("AUTO-INSTALL JAVA 21", style: GoogleFonts.unbounded(fontWeight: FontWeight.w900, letterSpacing: 1)),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.white.withOpacity(0.1),
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                          onPressed: () => Navigator.pop(context),
+                          child: Text("CANCEL", style: GoogleFonts.unbounded(fontWeight: FontWeight.bold, letterSpacing: 1)),
+                        ),
+                      )
+                    ],
+                  ),
+          ),
+        ),
+      ),
+    );
+  }
 }

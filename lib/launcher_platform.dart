@@ -197,6 +197,18 @@ class AuthCore {
     return Map<String, String>.from(jsonDecode(res.body));
   }
 
+  static Future<Map<String, dynamic>> refreshMicrosoftToken(String refreshToken) async {
+    final res = await http.post(
+      Uri.parse("https://login.live.com/oauth20_token.srf"),
+      body: {
+        "client_id": clientId, 
+        "grant_type": "refresh_token", 
+        "refresh_token": refreshToken
+      },
+    );
+    return jsonDecode(res.body);
+  }
+
   static Future<Map<String, dynamic>> pollMicrosoftToken(String deviceCode) async {
     final res = await http.post(
       Uri.parse("https://login.live.com/oauth20_token.srf"),
