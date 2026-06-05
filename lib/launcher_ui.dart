@@ -308,24 +308,28 @@ class SettingsView extends StatefulWidget {
 class _SettingsViewState extends State<SettingsView> {
   late TextEditingController _caperController;
   late TextEditingController _javaController;
+  late TextEditingController _jvmArgsController;
 
   @override
   void initState() {
     super.initState();
     _caperController = TextEditingController(text: widget.state.caperUrl);
     _javaController = TextEditingController(text: widget.state.globalJavaPath);
+    _jvmArgsController = TextEditingController(text: widget.state.jvmArgs);
   }
 
   @override
   void dispose() {
     _caperController.dispose();
     _javaController.dispose();
+    _jvmArgsController.dispose();
     super.dispose();
   }
 
   void _saveAll() {
     widget.state.globalJavaPath = _javaController.text.trim().isEmpty ? "Auto-Detect" : _javaController.text.trim();
     widget.state.caperUrl = _caperController.text.trim();
+    widget.state.jvmArgs = _jvmArgsController.text.trim();
     widget.state.saveGlobalSettings();
   }
 
@@ -361,6 +365,33 @@ class _SettingsViewState extends State<SettingsView> {
                   setState(() => widget.state.globalRamGB = val);
                   _saveAll();
                 }),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 32),
+
+        _buildSectionTitle(Icons.terminal, "JVM ARGUMENTS (ADVANCED)"),
+        GlassCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children:[
+              Text("JVM FLAGS", style: GoogleFonts.plusJakartaSans(color: Colors.white54, fontWeight: FontWeight.bold, fontSize: 12)),
+              const SizedBox(height: 4),
+              Text("Edit these flags directly. Changes apply to all launches.",
+                  style: GoogleFonts.plusJakartaSans(color: Colors.white24, fontSize: 10, fontStyle: FontStyle.italic)),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _jvmArgsController,
+                style: GoogleFonts.plusJakartaSans(color: Colors.white, fontSize: 12),
+                maxLines: 4,
+                onChanged: (value) => _saveAll(),
+                decoration: InputDecoration(
+                  enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white.withOpacity(0.1))),
+                  focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: widget.state.currentEngineColor)),
+                  filled: true,
+                  fillColor: Colors.black26,
+                ),
               ),
             ],
           ),
@@ -1380,6 +1411,14 @@ class _AccountManagerModalState extends State<AccountManagerModal> {
                           decoration: BoxDecoration(color: widget.state.currentEngineColor, borderRadius: BorderRadius.circular(4)),
                           child: Text("ACTIVE", style: GoogleFonts.unbounded(fontSize: 8, color: Colors.black, fontWeight: FontWeight.bold)),
                         ),
+                      IconButton(
+                        icon: Icon(Icons.play_arrow, color: widget.state.currentEngineColor),
+                        tooltip: "Launch game with this account",
+                        onPressed: () {
+                          Navigator.pop(context);
+                          widget.state.launchGameAsAccount(acc);
+                        },
+                      ),
                       IconButton(
                         icon: const Icon(Icons.delete_outline, color: Colors.white38),
                         onPressed: () {

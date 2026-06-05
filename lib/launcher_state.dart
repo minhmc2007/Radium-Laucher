@@ -41,16 +41,17 @@ class LauncherState extends ChangeNotifier {
   double launchProgress = 0.0;
   String launchStatus = "READY";
   Process? runningProcess;
+  final List<Process> _secondaryProcesses = [];
 
-  final String aikarFlags = 
-      "-XX:+UseG1GC -XX:+ParallelRefProcEnabled -XX:MaxGCPauseMillis=200 "
-      "-XX:+UnlockExperimentalVMOptions -XX:+DisableExplicitGC -XX:+AlwaysPreTouch "
-      "-XX:G1NewSizePercent=30 -XX:G1MaxNewSizePercent=40 -XX:G1HeapRegionSize=8M "
-      "-XX:G1ReservePercent=20 -XX:G1HeapWastePercent=5 -XX:G1MixedGCCountTarget=4 "
-      "-XX:InitiatingHeapOccupancyPercent=15 -XX:G1MixedGCLiveThresholdPercent=90 "
-      "-XX:G1RSetUpdatingPauseTimePercent=5 -XX:SurvivorRatio=32 "
-      "-XX:+PerfDisableSharedMem -XX:MaxTenuringThreshold=1 "
-      "-Dusing.aikars.flags=https://mcflags.emc.gs -Daikars.new.flags=true";
+  String jvmArgs = "-XX:+UseZGC -XX:+AlwaysPreTouch "
+      "-XX:+DisableExplicitGC -XX:+UseNUMA";
+
+  static String _sanitizeJvmArgs(String args) {
+    return args
+        .replaceAll(RegExp(r'-XX:\+ZGenerational\s*'), '')
+        .replaceAll(RegExp(r'-XX:AllocateHeapAt=\S*\s*'), '')
+        .trim();
+  }
 
   LauncherState() {
     _init();
@@ -72,6 +73,7 @@ class LauncherState extends ChangeNotifier {
         globalJavaPath = data['globalJavaPath'] ?? "Auto-Detect";
         caperUrl = data['caperUrl'] ?? "https://example.com/capes";
         showSnapshots = data['showSnapshots'] ?? false;
+        jvmArgs = _sanitizeJvmArgs(data['jvmArgs'] ?? jvmArgs);
 
         // AUTH CACHE LOADING
         if (data['savedAccounts'] != null) {
@@ -169,6 +171,7 @@ class LauncherState extends ChangeNotifier {
       'globalJavaPath': globalJavaPath,
       'caperUrl': caperUrl,
       'showSnapshots': showSnapshots,
+      'jvmArgs': jvmArgs,
       'savedAccounts': savedAccounts,
       'isAuthenticated': isAuthenticated,
       'authMode': authMode.toString(),
@@ -285,7 +288,7 @@ class LauncherState extends ChangeNotifier {
   }
 
   Future<void> launchGameLocal() async {
-    if (isLaunching || runningProcess != null) return;
+    if (!isAuthenticated) return;
     
     isLaunching = true;
     launchProgress = 0.05;
@@ -304,7 +307,7 @@ class LauncherState extends ChangeNotifier {
         version: selectedVersion,
         javaPath: jPath,
         ramGb: ram,
-        aikarFlags: aikarFlags,
+        jvmArgs: jvmArgs,
         caperUrl: caperUrl,
         username: username!,
         uuid: uuid,
@@ -345,6 +348,45 @@ class LauncherState extends ChangeNotifier {
       launchStatus = "READY";
       launchProgress = 0.0;
       notifyListeners();
+    }
+  }
+
+  Future<void> launchGameAsAccount(Map<String, dynamic> account) async {
+    try {
+      double ram = globalRamGB;
+      if (activeProfileSettings['ramGb'] != null) ram = (activeProfileSettings['ramGb'] as num).toDouble();
+
+      String jPath = resolveActiveJavaPath();
+      MinecraftCore.logVerbose("Launching as ${account['username']} with Java: $jPath");
+
+      Process process = await MinecraftCore.launch(
+        mcDir: minecraftDir,
+        version: selectedVersion,
+        javaPath: jPath,
+        ramGb: ram,
+        jvmArgs: jvmArgs,
+        caperUrl: caperUrl,
+        username: account['username'] ?? '',
+        uuid: account['uuid'] ?? '',
+        accessToken: account['accessToken'] ?? '',
+        userType: account['userType'] ?? '',
+        onLog: (_, __) {},
+      );
+
+      _secondaryProcesses.add(process);
+
+      process.stdout.transform(utf8.decoder).listen((data) => print("[MC-${account['username']}]: $data"));
+      process.stderr.transform(utf8.decoder).listen((data) {
+        print("[MC ERR-${account['username']}]: $data");
+        if (data.contains("UnsatisfiedLinkError") || data.contains("libjawt.so") || data.contains("UnsupportedClassVersionError")) {
+          print("[RADIUM ERROR] Incompatible Java version for ${account['username']}");
+        }
+      });
+
+      await process.exitCode;
+      _secondaryProcesses.remove(process);
+    } catch (e) {
+      print("[RADIUM ERROR] Launch failed for ${account['username']}: $e");
     }
   }
 }

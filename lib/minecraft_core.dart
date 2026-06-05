@@ -306,7 +306,7 @@ class MinecraftCore {
     required String version,
     required String javaPath,
     required double ramGb,
-    required String aikarFlags,
+    required String jvmArgs,
     required String caperUrl,
     required String username,
     required String uuid,
@@ -359,7 +359,7 @@ class MinecraftCore {
     List<String> args =[];
     final ram = ramGb.toInt();
     args.addAll(['-Xmx${ram}G', '-Xms${ram}G']);
-    args.addAll(aikarFlags.split(' '));
+    args.addAll(jvmArgs.split(' '));
     
     if (caperUrl.isNotEmpty) {
       args.add("-Dcaper.url=$caperUrl");
